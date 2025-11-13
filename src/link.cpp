@@ -8,7 +8,21 @@
 
 typedef uint16_t uint;
 
-class Vertex {
+enum class Orientation {
+    pos = 0,
+    neg = 1
+};
+
+enum class CrossingType {
+    over = 0,
+    under = 1
+};
+
+constexpr CrossingType operator!(CrossingType b) noexcept {
+  return (b == CrossingType::under) ? CrossingType::over : CrossingType::under;
+}
+
+struct Vertex {
     uint under[2];
     uint over[2];
 
@@ -37,9 +51,11 @@ public:
   Link(){};
 
 private:
-  static constexpr uint SIGN = uint(1) << (sizeof(uint) * 8 - 1);
-  static inline uint SIGNED(uint a, bool sign) noexcept {return sign ? (a | SIGN) : (a & ~SIGN); }
-  static inline bool GET_SIGN(uint a) noexcept { return a & SIGN; }
+  static constexpr uint TYPE = uint(1) << (sizeof(uint) * 8 - 1);
+  static constexpr uint SIGN = uint(1) << (sizeof(uint) * 8 - 2);
+
+  static inline uint FLAGGED(uint a, Orientation sign, CrossingType type) noexcept {return a;} //TODO: implement
+  static inline Orientation GET_SIGN(uint a) noexcept { return a & SIGN ? Orientation::neg : Orientation::pos; }
   static inline uint NEG(uint a) noexcept { return a ^ SIGN; }
   static inline uint ABS(uint a) noexcept { return a & ~SIGN; }
   inline uint abs_mate(uint a) const noexcept { return ABS(mate[a]); }
@@ -177,9 +193,7 @@ private:
   }
 
 
-  int R1_pos(uint a_, Link<static_n_components> &result) const noexcept { // loop is (a_, a_+1), a_ is signed
-    uint a = ABS(a_);
-
+  int R1_pos(uint a, Orientation sign, Link<static_n_components> &result) const noexcept { // loop a
     result.n_crossings = n_crossings + 1;
     std::memcpy(result.n_comp_crossings, n_comp_crossings,n_comp() * sizeof(uint));
     result.inc_comp(a);
@@ -191,8 +205,9 @@ private:
     for (uint i = a; i < 2 * n_crossings; i++)
       result.mate[i + 2] = looping_index(a, mate[i]);
 
-    result.mate[a] = a_ + 1;
-    result.mate[a + 1] = NEG(a_);
+    result.mate[a] = FLAGGED(a + 1, sign, (CrossingType) sign);
+    result.mate[a + 1] = FLAGGED(a, sign, !(CrossingType) sign);
+
     return 0;
   }
 
@@ -268,18 +283,47 @@ private:
   }
 
   void to_graph(Vertex *v0) const noexcept {
-    for (uint i = 0; i < 2 * n_crossings; i++){
-        v0[i].under[0] = i;
-        v0[i].over[0] = mate[i];
-        v0[i].under[1] = next(i);
-        v0[i].over[1] = prev(i);
+    uint vertex[2 * n_crossings]; //TODO: fill in
+    uint cur = 0; //unsigned
+    uint cur_comp_start = 0;
+    uint cur_comp_ind = 0;
+    for (uint k = 0; k < n_crossings; k++){
+        while (GET_SIGN(mate[cur]) == Orientation::pos)
+            cur = ABS(next(cur));
+        vertex[cur] = k;
+        vertex[abs_mate(cur)] = k;
+        uint next_ = abs(next(cur));
+        if (next_ != cur_comp_start){
+            cur = next_;
+        } else {
+            cur = next_ + 2 * n_comp_crossings[cur_comp_ind];
+            cur_comp_ind++;
+        }
     }
+
+    for (uint a = 0; a < 2 * n_crossings; a++){
+        if (GET_SIGN(mate[a]) == Orientation::neg) 
+            continue;
+
+        uint k = vertex[a];
+        uint b = abs_mate(a);
+        v0[k].over[0] = vertex[next(a)];
+        v0[k].over[1] = vertex[prev(a)];
+        if (true) {
+            v0[k].under[0] = vertex[next(b)];
+            v0[k].under[1] = vertex[prev(b)];
+        } else {
+            v0[k].under[0] = vertex[prev(b)];
+            v0[k].under[1] = vertex[next(b)];
+        }
+    }
+
   }
 
   private:
-  void bind(uint a, uint b, bool sign) { //if sign: a is over, b is under
-    mate[a] = SIGNED(b, sign);
-    mate[b] = SIGNED(a, !sign);
+  void bind(uint a, uint b, Orientation sign, CrossingType type) { //if sign: a is over, b is under
+    mate[a] = FLAGGED(b, sign, type);
+    mate[b] = FLAGGED(a, sign, !type);
   }
 };
 
