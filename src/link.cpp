@@ -51,22 +51,38 @@ public:
   Link(){};
 
 private:
-  static constexpr uint TYPE = uint(1) << (sizeof(uint) * 8 - 1);
-  static constexpr uint SIGN = uint(1) << (sizeof(uint) * 8 - 2);
+  static constexpr uint16_t TYPE_SHIFT = (sizeof(uint) * 8 - 1);
+  static constexpr uint16_t SIGN_SHIFT = (sizeof(uint) * 8 - 2);
+  static constexpr uint TYPE = uint(1) << TYPE_SHIFT;
+  static constexpr uint SIGN = uint(1) << SIGN_SHIFT;
+  static constexpr uint FLAG_MASK = TYPE | SIGN;
+  static constexpr uint INDEX_MASK = FLAG_MASK; //TODO it should the bit flip of FLAG
 
-  static inline uint FLAGGED(uint a, Orientation sign, CrossingType type) noexcept {return a;} //TODO: implement
-  static inline Orientation GET_SIGN(uint a) noexcept { return a & SIGN ? Orientation::neg : Orientation::pos; }
-  static inline uint NEG(uint a) noexcept { return a ^ SIGN; }
-  static inline uint ABS(uint a) noexcept { return a & ~SIGN; }
+  static inline uint FLAG(Orientation sign, CrossingType type) noexcept {
+    return (uint) sign << SIGN_SHIFT | (uint) type << TYPE_SHIFT;
+  }
+
+
+  static inline uint FLAGGED(uint a, uint flag) noexcept {return a | flag;}
+
+  static inline Orientation GET_SIGN(uint a) noexcept { return Orientation ((a >> SIGN_SHIFT) & 1); }
+  static inline CrossingType GET_TYPE(uint a) noexcept { return CrossingType ((a >> TYPE_SHIFT) & 1);}
+
+  static inline uint FLIP(uint a) noexcept { return a ^ TYPE; }
+  static inline uint MIRROR(uint a) noexcept { return a ^ SIGN; }
+
+  static inline uint ABS(uint a) noexcept { return a & ~FLAG_MASK; }
   inline uint abs_mate(uint a) const noexcept { return ABS(mate[a]); }
+
+  inline uint LOOP_FLAG(Orientation sign){ return FLAG(sign, (CrossingType) sign);}
 
   inline uint n_comp() const noexcept {
     return dynamic ? dynamic_n_components : static_n_components;
   }
 
 
-  inline std::pair<bool, uint> mate_unsigned(uint a) const noexcept {
-    return {GET_SIGN(mate[a]), ABS(mate[a])};
+  inline std::pair<uint, uint> unflag(uint a) const noexcept {
+    return {GET_FLAG(mate[a]), ABS(mate[a])};
   }
 
   inline bool are_adjacent(uint a, uint b) const noexcept {
@@ -205,14 +221,12 @@ private:
     for (uint i = a; i < 2 * n_crossings; i++)
       result.mate[i + 2] = looping_index(a, mate[i]);
 
-    result.mate[a] = FLAGGED(a + 1, sign, (CrossingType) sign);
-    result.mate[a + 1] = FLAGGED(a, sign, !(CrossingType) sign);
-
+    result.bind(a, a + 1, LOOP_FLAG(sign));
     return 0;
   }
 
   int R2_neg(uint a, Link<static_n_components> &result) const noexcept {
-    if (!is_bigon(a)) {
+    if (!is_bigon(a)) { //should only be in debug
       return -1;
     }
 
@@ -223,7 +237,7 @@ private:
     std::memcpy(result.n_comp_crossings, n_comp_crossings,n_comp() * sizeof(uint));
     result.dec_comps(a, b);
 
-#pragma GCC ivdep // FIX THE LOOPS BELOW: they don't account wrapping around the component
+#pragma GCC ivdep // FIX THE LOOPS BELOW: they don't account for wrapping around the component
     for (uint i = 0; i < min_; i++)
       result.mate[i] = depoking_index(min_, max_, mate[i]);
 
@@ -237,7 +251,7 @@ private:
   }
 
 
-  int R2_pos(uint a, uint b, bool collinear, Link<static_n_components> &result) const noexcept { // a goes over b
+  int R2_pos(uint a, uint b, bool collinear, Link<static_n_components> &result) const noexcept { //a is over and positive
     result.n_crossings = n_crossings + 2;
     std::memcpy(result.n_comp_crossings, n_comp_crossings,n_comp() * sizeof(uint));
     result.inc_comps(a, b);
@@ -255,20 +269,21 @@ private:
         result.mate[i + shift] = poking_index(min_, max_, mate[i]);
     }
 
-    result.bind(a, b, true);
-    result.bind(a2, b2, true);
+    const uint flag = FLAG(Orientation::pos, CrossingType::over); //fix orientation
+    result.bind(a, b, flag);
+    result.bind(a2, b2, MIRROR(flag));
     return 0;
   }
 
   int R3(uint a, bool dir_a, bool dir_b, Link<static_n_components> &result) const noexcept {
     const uint a1 = a;
-    auto [sign1, b1] = mate_unsigned(a1);
+    auto [flag_pivot, b1] = unflag(mate[a1]);
     uint a2 = dir_a ? next(a1) : prev(a1);
     uint b2 = dir_b ? next(b1) : prev(b1);
-    auto [sign_c, c_a] = mate_unsigned(a2);
-    auto [sign_c_, c_b] = mate_unsigned(b2);
+    auto [flag_a, c_a] = unflag(mate[a2]);
+    auto [flag_b, c_b] = unflag(mate[b2]);
 
-    if (!(are_adjacent(c_a, c_b) && sign_c == sign_c_)) {
+    if (!(are_adjacent(c_a, c_b) && GET_TYPE(flag_a) == GET_TYPE(flag_b))) { //should only be in debug
       return -1;
     }
 
@@ -276,9 +291,9 @@ private:
     std::memcpy(result.n_comp_crossings, n_comp_crossings,n_comp() * sizeof(uint));
     std::memcpy(result.mate, mate, 2 * n_crossings * sizeof(uint));
 
-    result.bind(a1, c_b, sign_c);
-    result.bind(b1, c_a, sign_c);
-    result.bind(a2, b2, sign1);
+    result.bind(a1, c_b, flag_a);
+    result.bind(b1, c_a, flag_b);
+    result.bind(a2, b2, flag_pivot);
     return 0;
   }
 
@@ -302,7 +317,7 @@ private:
     }
 
     for (uint a = 0; a < 2 * n_crossings; a++){
-        if (GET_SIGN(mate[a]) == Orientation::neg) 
+        if (GET_SIGN(mate[a]) == CrossingType::over) 
             continue;
 
         uint k = vertex[a];
@@ -321,9 +336,9 @@ private:
   }
 
   private:
-  void bind(uint a, uint b, Orientation sign, CrossingType type) { //if sign: a is over, b is under
-    mate[a] = FLAGGED(b, sign, type);
-    mate[b] = FLAGGED(a, sign, !type);
+  void bind(uint a, uint b, uint flag) {
+    mate[a] = FLAGGED(b, flag);
+    mate[b] = FLAGGED(a, FLIP(flag));
   }
 };
 
