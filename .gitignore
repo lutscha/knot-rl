@@ -1,0 +1,4 @@
+.venv
+notebooks
+src/__pycache__/
+src/knotrl.egg-info
