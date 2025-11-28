@@ -1,81 +1,8 @@
 import torch
 from torch import nn
 import torch.nn.functional as F
-import math 
+import math
 from torch_geometric.nn import GCNConv, global_mean_pool
-
-class PositionalEncoding(nn.Module):
-    """
-    Implements positional encoding for nodes in a graph diagram representation.
-
-    It treats the Dowker sequence positions as temporal positions and encodes 
-    them using sine and cosine functions. The encoding follows the standard 
-    formula:
-
-    $$
-    P(k, 2i) = \\sin\\left(\\frac{k}{n^{2i/d_{model}}}\\right)
-    $$
-    $$
-    P(k, 2i+1) = \\cos\\left(\\frac{k}{n^{2i/d_{model}}}\\right)
-    $$
-
-    Args:
-        d_model (int): Dimension of the model (embedding size). Note that since each
-        node appears twice, their final embedding will be of size 2 * d_model as the
-        over and under encodings are concantenated.
-        max_len (int, optional): Maximum length of Dowker sequence. Should be 
-            2 * max crossings expected. Defaults to 500.
-        n (int, optional): Base for the positional encoding frequency. 
-            Defaults to 10000.
-
-    Attributes:
-        pe (torch.Tensor): The learnable positional encoding buffer of shape 
-            (max_len, d_model).
-    """
-    def __init__(self, d_model, max_len=500, n=10000):
-        super(PositionalEncoding, self).__init__()
-
-        self.d_model = d_model
-        self.max_len = max_len
-        self.n = n
-
-        pe = torch.zeros(max_len, d_model)
-        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
-        
-        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(n) / d_model))
-        
-        pe[:, 0::2] = torch.sin(position * div_term)
-        pe[:, 1::2] = torch.cos(position * div_term)
-
-        self.register_buffer('pe', pe)
-
-    def forward(self, x):
-        """Encodes the input tensor using the pre-computed positional buffer.
-
-        Args:
-            x (torch.Tensor): Input tensor of shape (2, num_nodes). 
-                - Row 0: Positions in the Dowker sequence.
-                - Row 1: Over/under information (0 for over, 1 for under).
-                
-                Example input for Trefoil:
-                [[0, 1, 2, 0, 1, 2],
-                 [0, 1, 0, 1, 0, 1]]
-
-        Returns:
-            torch.Tensor: Flattened node embeddings of shape (num_nodes, 2 * d_model).
-        """
-
-        num_nodes = x.shape[1]//2
-        
-        node_embeddings = torch.zeros(
-            (num_nodes, 2, self.d_model),
-            device=x.device,
-            dtype=self.pe.dtype
-        )
-
-        node_embeddings[x[0], x[1]] = self.pe[:num_nodes*2]
-
-        return node_embeddings.flatten(1)
 
 class KnotAttention(nn.Module):
     """
@@ -118,7 +45,7 @@ class KnotAttention(nn.Module):
         
         Args:
             x: (num_nodes, input_dim)
-            adjacency_matrix: (4, num_Nndes)
+            adjacency_matrix: (num_nodes, 4)
 
         Returns:
             Z: (num_nodes, Heads * d_v)
@@ -126,23 +53,23 @@ class KnotAttention(nn.Module):
         
         N = x.shape[0]
 
-        # (4, num_nodes, input_dim)
+        # (num_nodes, 4, input_dim)
         real_neighbors = x[adjacency_matrix]
 
-        # (1, num_nodes, input_dim)
-        self_node = x.unsqueeze(0)
+        # (num_nodes, 1, input_dim)
+        self_node = x.unsqueeze(1)
         
-        # (5, num_nodes, input_dim)
-        x_neighbors = torch.cat([self_node, real_neighbors], dim=0)
+        # (num_nodes, 5, input_dim)
+        x_neighbors = torch.cat([self_node, real_neighbors], dim=1)
 
         Q = torch.einsum('nd,hdk->hnk', x, self.w_q)
-        K = torch.einsum('rnd,hrdk->hrnk', x_neighbors, self.w_k)
-        V = torch.einsum('rnd,hrdv->hrnv', x_neighbors, self.w_v)
+        K = torch.einsum('nrd,hrdk->hnrk', x_neighbors, self.w_k)
+        V = torch.einsum('nrd,hrdv->hnrv', x_neighbors, self.w_v)
 
-        A = torch.einsum('hnk,hrnk->hrn', Q, K)/math.sqrt(self.d_k)
+        A = torch.einsum('hnk,hnrk->hnr', Q, K)/math.sqrt(self.d_k)
         A = F.softmax(A, dim=1)
 
-        Z = torch.einsum('hrn,hrnv->hnv', A, V)
+        Z = torch.einsum('hnr,hnrv->hnv', A, V)
 
         Z = Z.permute(1, 0, 2).reshape(N, -1)
 
@@ -196,7 +123,7 @@ class KnotTransformerLayer(nn.Module):
                 Shape: `(num_nodes, input_dim)`
             adjacency_matrix (torch.Tensor): Indices of the 4 distinct neighbors 
                 for each node (excluding self-loop).
-                Shape: `(4, num_nodes)`
+                Shape: `(num_nodes, 4)`
 
         Returns:
             torch.Tensor: Updated node features preserving input shape.
@@ -210,6 +137,8 @@ class KnotTransformerLayer(nn.Module):
 
         return x
 
+### Experimental Models ###
+
 class KnotMultiTransformerClassifier(nn.Module):
     """
     A deep Relational Transformer model for classifying knot diagrams (e.g., Trivial vs. Non-Trivial).
@@ -219,14 +148,11 @@ class KnotMultiTransformerClassifier(nn.Module):
     global representation to make a binary classification decision.
 
     The architecture follows:
-    1. **Embedding:** Encodes Dowker sequence positions, over/under and in/out information.
-       Note: The encoder produces 2 embeddings per node and
-       concatenates them. Therefore, `input_dim` must be even.
-    2. **Transformer Stack:** $L$ layers of Relational Multi-Head Attention and 
+    1. **Transformer Stack:** $L$ layers of Relational Multi-Head Attention and 
        Feed-Forward networks.
-    3. **Global Pooling:** Adaptive Average Pooling to collapse variable node 
+    2. **Global Pooling:** Adaptive Average Pooling to collapse variable node 
        counts into a fixed-size vector.
-    4. **Classifier Head:** A MLP projecting the global vector to logits.
+    3. **Classifier Head:** A MLP projecting the global vector to logits.
 
     Args:
         num_layers (int): The number of Transformer layers to stack.
@@ -250,8 +176,6 @@ class KnotMultiTransformerClassifier(nn.Module):
         if input_dim % heads != 0:
             raise ValueError(f"input_dim ({input_dim}) must be divisible by heads ({heads}) for Attention splitting.")
 
-        self.encoder = PositionalEncoding(d_model=input_dim//2, max_len=max_encode_len, n=n_encode)
-
         self.layers = nn.ModuleList([
             KnotTransformerLayer(input_dim, d_k, heads, d_ff)
             for _ in range(num_layers)
@@ -271,12 +195,12 @@ class KnotMultiTransformerClassifier(nn.Module):
 
         Args:
             x (torch.Tensor): Raw node specifications. 
-                Shape: `(2, num_nodes)`
-                - Row 0: Dowker sequence positions.
-                - Row 1: Over/Under/Sign information (depending on Embedding impl).
+                Shape: `(num_nodes, 2)`
+                - Column 0: Dowker sequence positions.
+                - Column 1: Over/Under/Sign information (depending on Embedding impl).
             adjacency_matrix (torch.Tensor): Indices of the 4 distinct neighbors 
                 for each node.
-                Shape: `(4, num_nodes)`
+                Shape: `(num_nodes, 4)`
 
         Returns:
             torch.Tensor: Unnormalized logits for classification.
@@ -284,8 +208,6 @@ class KnotMultiTransformerClassifier(nn.Module):
                 - Index 0: Score for Class 0 (e.g., Non-Trivial)
                 - Index 1: Score for Class 1 (e.g., Trivial)
         """
-        x = self.encoder(x)
-
         for layer in self.layers:
             x = layer(x, adjacency_matrix)
             
@@ -301,8 +223,6 @@ class ValueGCN(nn.Module):
     """
     def __init__(self, input_dim, hidden_dim):
         super(ValueGCN, self).__init__()
-
-        self.pe_encoder = PositionalEncoding(d_model=input_dim)
 
         self.conv1 = GCNConv(input_dim*2, hidden_dim)
         self.conv2 = GCNConv(hidden_dim, hidden_dim)
