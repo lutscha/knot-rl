@@ -19,15 +19,17 @@
 #define KNOT_PRAGMA_IVDEP
 #endif
 
+#ifdef __clang__
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wunused-parameter"
+#endif
 
 struct Vertex {
   uint16_t under[2];
   uint16_t over[2];
   uint8_t flags;
 
-  inline Vertex() : flags(0) {}
+  inline Vertex() : under{0, 0}, over{0, 0}, flags(0) {}
 
   Vertex(uint16_t under[2], uint16_t over[2], uint8_t flags) : flags(flags) {
     for (uint16_t i = 0; i < 2; i++) {
@@ -94,25 +96,29 @@ private:
 
   inline uint16_t new_n_crossings(ReidemeisterKind kind) const {
     int32_t result = int32_t(n_crossings) + N_CROSSING_CHANGE(kind);
-    if (result < 0) {
-      throw std::runtime_error("Negative n_crossings");
-    };
     return uint16_t(result);
   }
 
 
   inline uint16_t mate(uint16_t a) const noexcept { return visits[a].mate; }
 
-  inline uint16_t flags(uint16_t a) const noexcept { return visits[a].flags; }
+  inline uint8_t flags(uint16_t a) const noexcept { return visits[a].flags; }
 
   inline bool are_adjacent(uint16_t a, uint16_t b) const noexcept {
     return next(a) == b || prev(a) == b;
   }
 
   inline std::pair<uint16_t, uint16_t> get_comp(uint16_t a) const noexcept {
-    if (comp_cnt() == 1) {
-      return {0, a};
+
+    #ifdef DEBUG
+    if (a >= 2 * n_crossings) {
+      std::cerr << "get_comp index out of bounds: " << a << " >= " << 2 * n_crossings << std::endl;
+      return {0, 0};
     }
+    #endif
+    
+    if (comp_cnt() == 1)
+      return {0, a};
 
     uint16_t pref = 0;
     for (uint16_t j = 0; j < comp_cnt(); j++) {
@@ -169,9 +175,9 @@ private:
   }
 
   inline void defrag_comps() noexcept {
-    uint16_t shift = 0;
-    for (uint16_t i = 0; i < comp_cnt(); i++) {
-      if (n_conn_crossings(i) == 0) {
+    uint16_t shift = 0, comp_cnt_ = comp_cnt();
+    for (uint16_t i = 0; i < comp_cnt_; i++) {
+      if (n_conn_crossings(i) == 0) [[unlikely]] {
         shift++;
       } else if (shift > 0)
         n_conn_crossings(i - shift) = n_conn_crossings(i);
@@ -238,18 +244,18 @@ private:
     const uint16_t b_a = visits[a_b].mate;
 
 
-    return (Visit::GET_TYPE(flag_cb) == VisitType::under && 
+    return Visit::GET_TYPE(flag_cb) == VisitType::under && 
             Visit::GET_TYPE(flag_ac) == VisitType::over &&
-            Visit::GET_TYPE(flag_ab) == VisitType::over) && 
-            are_adjacent(b_a, b_c) && a_c != a_b && a_c != b_c && a_b != b_c;
+            Visit::GET_TYPE(flag_ab) == VisitType::over && 
+            are_adjacent(b_a, b_c) && 
+            a_c != a_b && a_c != b_c && a_b != b_c;
   }
 
   uint8_t compute_moves(uint16_t a) const noexcept {
     if (visits[a].type() == VisitType::under)
       return 0;
 
-    uint8_t res =
-        is_loop(a) << Visit::R1_NEG_SHIFT | is_bigon(a) << Visit::R2_NEG_SHIFT;
+    uint8_t res = is_loop(a) << Visit::R1_NEG_SHIFT | is_bigon(a) << Visit::R2_NEG_SHIFT;
     for (auto dir_a : {Direction::next, Direction::prev}) {
       for (auto dir_c : {Direction::next, Direction::prev}) {
         res |= is_triangle(a, dir_a, dir_c) << (Visit::DIR_SHIFT(dir_a, dir_c));
@@ -296,9 +302,7 @@ private:
     }
   }
 
-  bool
-  is_valid_R2(uint16_t a, uint16_t b,
-              const ReidemeisterMove &move) const noexcept { // non_local R2+
+  bool is_valid_R2(uint16_t a, uint16_t b, const ReidemeisterMove &move) const noexcept { // non_local R2+
     std::cerr << "Not implemented: is_valid_R2 for " << a << " and " << b
               << " with args " << move << std::endl;
     return get_comp(a).second > 0 && get_comp(b).second > 0 &&
@@ -306,7 +310,7 @@ private:
   }
 
   bool is_valid_R2(uint16_t a, const ReidemeisterMove &move) const noexcept {
-    return true; // compute actual value
+    return true; // TODO: compute actual value
   }
 
   void look_for_bigon(uint16_t a, uint16_t b) {
@@ -337,17 +341,16 @@ private:
   }
 
 public: // constructors
-  STATIC
-  Link(const uint16_t n_crossings, const uint16_t *n_conn_crossings, Visit *storage)
+  STATIC Link(const uint16_t n_crossings, const uint16_t *n_conn_crossings, Visit *storage)
       : n_crossings(n_crossings), visits(storage) {
     std::memcpy(static_n_conn_crossings, n_conn_crossings,comp_cnt() * sizeof(uint16_t));
     compute_all_moves();
   }
 
-  DYNAMIC Link (const uint16_t n_crossings, uint16_t components_cnt, uint16_t *storage, const uint16_t *n_conn_crossings)
+  DYNAMIC Link (const uint16_t n_crossings, uint16_t components_cnt, void *storage, const uint16_t *n_conn_crossings)
       : n_crossings(n_crossings), 
        dynamic_components_cnt(components_cnt),
-       dynamic_n_conn_crossings(storage),
+       dynamic_n_conn_crossings(reinterpret_cast<uint16_t *>(storage)),
        visits(reinterpret_cast<Visit *>(storage + dynamic_components_cnt)) {
 
     std::memcpy(dynamic_n_conn_crossings, n_conn_crossings,dynamic_components_cnt * sizeof(uint16_t));
@@ -355,7 +358,15 @@ public: // constructors
     compute_all_moves();
   }
 
- Link<static_n_components> apply_move(uint16_t v, ReidemeisterMove move, uint16_t *storage) const {
+ Link<static_n_components> apply_move(uint16_t v, ReidemeisterMove move, void *storage) const {
+    if (n_crossings == 0) [[unlikely]] {
+      if (move.kind != ReidemeisterKind::R1_pos || v != 0) {  
+        std::cerr << "Invalid move: only positive R1 with v=0 is allowed on unknots, received " << move << " on " << v << std::endl;
+        return *this;
+      }
+      return Link<static_n_components>(*this, 0, move, reinterpret_cast<Visit *>(storage));
+    }
+
     bool under = (move.type() == VisitType::under) && (move.kind == ReidemeisterKind::R2_pos);
     const uint16_t a = (visits[2 * v].type() == VisitType::over) ^ under ? 2 * v : mate(2 * v);
 
@@ -364,7 +375,7 @@ public: // constructors
       throw std::runtime_error("Invalid move");
     }
     if constexpr (dynamic) {
-      return Link<static_n_components>(*this, a, move, storage);
+      return Link<static_n_components>(*this, a, move, reinterpret_cast<uint16_t *>(storage));
     } else {
       return Link<static_n_components>(*this, a, move, reinterpret_cast<Visit *>(storage));
     }
@@ -373,8 +384,7 @@ public: // constructors
   STATIC Link(const Link<static_n_components> &link, uint16_t a, const ReidemeisterMove &move, Visit *storage)
       : n_crossings(link.new_n_crossings(move.kind)), visits(reinterpret_cast<Visit *>(storage)) {
 
-    std::memcpy(static_n_conn_crossings, link.static_n_conn_crossings,
-                static_n_components * sizeof(uint16_t));
+    std::memcpy(static_n_conn_crossings, link.static_n_conn_crossings, static_n_components * sizeof(uint16_t));
 
     switch (move.kind) {
     case ReidemeisterKind::R1_neg:
@@ -387,7 +397,7 @@ public: // constructors
       R2_neg(link, a);
       break;
     case ReidemeisterKind::R2_pos:
-      R2_pos(link, a, move.dir_over(), move.dir_under(), move.type());
+      R2_pos(link, a, move.type(), move.dir_over(), move.dir_under());
       break;
     case ReidemeisterKind::R3:
       R3(link, a, move.dir_over(), move.dir_under());
@@ -424,13 +434,11 @@ public: // constructors
     }
   }
 
-  void R1_neg(const Link<static_n_components> &link,
-              const uint16_t a) noexcept {
+  void R1_neg(const Link<static_n_components> &link, const uint16_t a) noexcept {
     const uint16_t a_next = link.next(a);
     const bool wrapping = a_next != a + 1;
     auto deloop = [a, a_next, &link](uint16_t i) {
-      return Visit(delooping_index(a, a_next, link.visits[i].mate),
-                   link.visits[i].flags);
+      return Visit(delooping_index(a, a_next, link.visits[i].mate), link.visits[i].flags);
     };
 
     uint16_t prev_ = delooping_index(a, a_next, link.prev(a));
@@ -453,7 +461,7 @@ public: // constructors
         visits[i - 2] = deloop(i);
     }
 
-    if (mate(prev_) == next_) {
+    if (mate(prev_) == next_) [[unlikely]] {
       uint16_t over_ = visits[prev_].type() == VisitType::over ? prev_ : next_;
       visits[over_].flags |= Visit::R1_NEG;
       if (prev_ == over_)
@@ -589,11 +597,9 @@ public: // constructors
     auto [b1, b2] = link.R2_insertion_indices(b0, dir_under);
 
     if (a1 > b1){ 
-      a1+=2;
-      a2+=2;
+      a1 += 2, a2 += 2;
     } else {
-      b1+=2;
-      b2+=2;
+      b1 += 2, b2 += 2;
     }
 
     bool collinear = (dir_over == dir_under);
@@ -606,9 +612,7 @@ public: // constructors
     R2_pos(link, std::min(a1, a2), std::min(b1, b2), collinear, sign);
   }
 
-  void R3(const Link<static_n_components> &link, const uint16_t a_c,
-          Direction dir_a,
-          Direction dir_c) noexcept { // a_b, a_c and b_a are OVER
+  void R3(const Link<static_n_components> &link, const uint16_t a_c, Direction dir_a, Direction dir_c) noexcept { // a_b, a_c and b_a are OVER
     std::memcpy(visits, link.visits, 2 * n_crossings * sizeof(Visit));
 
     uint8_t flag_b = visits[a_c].crossing_flags();
@@ -674,7 +678,7 @@ public: // constructors
       }
 
       if ((a + b) % 2 == 0){
-        res << "Jordan's lemma violation: " << a << " and " << b << "are mates\n";
+        res << "Jordan's lemma violation: " << a << " and " << b << " are mates\n";
         violated = true;
       }
 
@@ -715,3 +719,10 @@ public: // constructors
     return {violated, res.str()};
   }
 };
+
+#undef DYNAMIC
+#undef STATIC
+
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
