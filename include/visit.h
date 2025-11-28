@@ -20,8 +20,8 @@ enum class ReidemeisterKind {
   R3 = 3
 };
 
-inline int16_t pm(const Orientation sign) noexcept {
-  return sign == Orientation::pos ? 1 : -1;
+inline int16_t pm(const VisitType type) noexcept {
+  return type == VisitType::over ? 1 : -1;
 }
 
 struct ReidemeisterMove {

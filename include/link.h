@@ -108,15 +108,7 @@ private:
     return next(a) == b || prev(a) == b;
   }
 
-  inline std::pair<uint16_t, uint16_t> get_comp(uint16_t a) const noexcept {
-
-    #ifdef DEBUG
-    if (a >= 2 * n_crossings) {
-      std::cerr << "get_comp index out of bounds: " << a << " >= " << 2 * n_crossings << std::endl;
-      return {0, 0};
-    }
-    #endif
-    
+  inline std::pair<uint16_t, uint16_t> get_comp(uint16_t a) const noexcept {    
     if (comp_cnt() == 1)
       return {0, a};
 
@@ -637,7 +629,7 @@ public: // constructors
 
   void to_dowker(int16_t *out) const noexcept {
     for (uint16_t vertex = 0; vertex < n_crossings; vertex++) {
-      int16_t sgn = pm(visits[2 * vertex].sign());
+      int16_t sgn = -pm(visits[2 * vertex].type());
       out[vertex] = sgn * (mate(2 * vertex) + 1);
     }
   }

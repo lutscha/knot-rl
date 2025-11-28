@@ -1,8 +1,6 @@
 // knot_engine.cpp
 #include <cstdint>
 #include <iostream>
-#include <sstream>
-#include <string>
 
 #include "../include/knot.h"
 
@@ -53,44 +51,49 @@ int main() {
     reinterpret_cast<uint16_t *>(storage + mem_per_knot));
 
   Knot snowman = twist.apply_move(
-      1, ReidemeisterMove::R1_pos(Orientation::pos, VisitType::over),
+      0 , ReidemeisterMove::R1_pos(Orientation::pos, VisitType::over),
       reinterpret_cast<uint16_t *>(storage + 2 * mem_per_knot));
 
-//   Knot snowman_ = twist.apply_move(
-//       1, ReidemeisterMove::R1_pos(Orientation::neg, VisitType::under),
-//       reinterpret_cast<uint16_t *>(storage + 3 * mem_per_knot));
+  print_state(snowman);
+  print_dowker(snowman);
 
-Knot triforce = snowman.apply_move(
+  //   Knot snowman_ = twist.apply_move(
+  //       1, ReidemeisterMove::R1_pos(Orientation::neg, VisitType::under),
+  //       reinterpret_cast<uint16_t *>(storage + 3 * mem_per_knot));
+
+  Knot triforce = snowman.apply_move(
       1, ReidemeisterMove::R1_pos(Orientation::neg, VisitType::under),
       reinterpret_cast<uint16_t *>(storage + 4 * mem_per_knot));
 
-Knot triforce_ = triforce.apply_move(
-    3, ReidemeisterMove::R3(Direction::prev, Direction::next),
-    reinterpret_cast<uint16_t *>(storage + 5 * mem_per_knot));
+  print_state(triforce);
+  print_dowker(triforce);
 
-Knot amir = triforce_.apply_move(
-    1, ReidemeisterMove::R2_pos(Direction::prev, Direction::next),
-    reinterpret_cast<uint16_t *>(storage + 6 * mem_per_knot));
+  Knot triforce_ = triforce.apply_move(
+      1, ReidemeisterMove::R3(Direction::next, Direction::prev),
+      reinterpret_cast<uint16_t *>(storage + 5 * mem_per_knot));
 
-Knot kolic = amir.apply_move(
-    1, ReidemeisterMove::R2_neg(),
-    reinterpret_cast<uint16_t *>(storage + 7 * mem_per_knot));
+  print_state(triforce_);
+  print_dowker(triforce_);
 
-Knot kms =
-    kolic.apply_move(2, ReidemeisterMove::R3(Direction::prev, Direction::next),
-                    reinterpret_cast<uint16_t *>(storage + 8 * mem_per_knot));
+  Knot amir = triforce_.apply_move(
+      1, ReidemeisterMove::R2_pos(Direction::prev, Direction::next),
+      reinterpret_cast<uint16_t *>(storage + 6 * mem_per_knot));
 
-print_state(snowman);
-print_dowker(snowman);
-print_state(triforce);
-print_dowker(triforce);
-print_state(triforce_);
-print_dowker(triforce_);
-print_state(amir);
-print_dowker(amir);
-print_state(kolic);
-print_dowker(kolic);
-print_state(kms);
-print_dowker(kms);
-return 0;
+  print_state(amir);
+  print_dowker(amir);
+
+  Knot kolic = amir.apply_move(4, ReidemeisterMove::R2_neg(),
+      reinterpret_cast<uint16_t *>(storage + 7 * mem_per_knot));
+
+  print_state(kolic);
+  print_dowker(kolic);
+
+  Knot kms =
+      kolic.apply_move(2, ReidemeisterMove::R3(Direction::prev,Direction::next),
+      reinterpret_cast<uint16_t *>(storage + 8 * mem_per_knot));
+
+ 
+  print_state(kms);
+  print_dowker(kms);
+  return 0;
 }
