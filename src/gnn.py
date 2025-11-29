@@ -124,11 +124,11 @@ class KnotTransformerLayer(nn.Module):
             adjacency_matrix (torch.Tensor): Indices of the 4 distinct neighbors 
                 for each node (excluding self-loop).
                 Shape: `(num_nodes, 4)`
-
         Returns:
             torch.Tensor: Updated node features preserving input shape.
                 Shape: `(num_nodes, input_dim)`
         """
+
         attn_output = self.attention(x, adjacency_matrix)
         x = self.norm1(x + attn_output)
 
@@ -136,6 +136,39 @@ class KnotTransformerLayer(nn.Module):
         x = self.norm2(x + ffn_output)
 
         return x
+
+class AlphaKnotNetwork(nn.Module):
+    """
+
+    """
+    def __init__(self, model_dim, d_k, transformer_layers=4, heads=2, d_ff=None, value_dim=None):
+        super().__init__()
+        
+        self.value_dim = value_dim if value_dim is not None else model_dim*4
+
+        self.transformer_pass = nn.ModuleList([
+            KnotTransformerLayer(input_dim=model_dim, d_k=d_k, heads=heads, d_ff=d_ff)
+            for _ in range(transformer_layers)
+        ])
+
+        self.value_head = nn.Sequential(
+            nn.Linear(model_dim, self.value_dim),
+            nn.ReLU(),
+            nn.Linear(self.value_dim, 1)
+        )
+
+    def forward(self, x, adjacency_matrix, mask, batch):
+
+        for layer in self.transformer_pass:
+            x = layer(x, adjacency_matrix)
+        
+        graph_embedding = global_mean_pool(x, batch)
+
+        values = self.value_head(graph_embedding).squeeze(-1)
+
+        # TODO: Policy network implementation
+
+        return values
 
 ### Experimental Models ###
 
