@@ -64,14 +64,13 @@ struct ReidemeisterMove {
     return ReidemeisterMove(ReidemeisterKind::R2_neg);
   }
 
-  static inline ReidemeisterMove R2_pos(Direction dir_over, Direction dir_under) noexcept {
+  static inline ReidemeisterMove R2_pos(VisitType type, Direction dir_over, Direction dir_under) noexcept {
     return ReidemeisterMove(ReidemeisterKind::R2_pos,
-                            (uint8_t)dir_over << DIR_OVER_SHIFT | (uint8_t)dir_under << DIR_UNDER_SHIFT);
+                            (uint8_t)type << TYPE_SHIFT | (uint8_t)dir_over << DIR_OVER_SHIFT | (uint8_t)dir_under << DIR_UNDER_SHIFT);
   }
 
   static inline ReidemeisterMove R2_pos(Orientation sign, bool collinear) noexcept {
-    return ReidemeisterMove(ReidemeisterKind::R2_pos,
-(uint8_t)sign << SIGN_SHIFT |  (uint8_t)collinear << COLLINEAR_SHIFT);
+    return ReidemeisterMove(ReidemeisterKind::R2_pos, (uint8_t)sign << SIGN_SHIFT |  (uint8_t)collinear << COLLINEAR_SHIFT);
   }
 
   static inline ReidemeisterMove R3(Direction dir_over, Direction dir_under) noexcept {
@@ -159,8 +158,8 @@ struct Visit {
     if (bit == 2) {return ReidemeisterMove::R2_neg();}
 
     uint dirs_shift = bit - 3;
-    Direction dir_over = Direction((dirs_shift >> 1) & 1);
-    Direction dir_under = Direction(dirs_shift & 1);
+    Direction dir_under = Direction((dirs_shift >> 1) & 1);
+    Direction dir_over = Direction(dirs_shift & 1);
     return ReidemeisterMove::R3(dir_over, dir_under);
   }
 
@@ -178,6 +177,8 @@ struct Visit {
   }
 
   Visit(uint16_t mate, uint8_t flags) : mate(mate), flags(flags) {};
+
+  Visit(uint16_t mate, Orientation sign, VisitType type) : mate(mate), flags(FLAG(sign, type)) {};
 
   inline bool is_loop() const noexcept { return flags & R1_NEG; }
 

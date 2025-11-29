@@ -1,99 +1,111 @@
 // knot_engine.cpp
+#include "greedy.cpp"
+#include <chrono>
 #include <cstdint>
 #include <iostream>
 
 #include "../include/knot.h"
 
-static constexpr uint16_t MAX_CROSSINGS = 1024;
-static int16_t dowker[MAX_CROSSINGS];
+using Clock = std::chrono::steady_clock;
 
-void print_dowker(const Knot &K) {
-  K.to_dowker(dowker);
-  std::cout << "DT: [";
-  for (uint16_t i = 0; i < K.n_crossings; i++) {
-    std::cout << dowker[i];
-    if (i < K.n_crossings - 1) {
-      std::cout << ", ";
-    }
-  }
-  std::cout << "]\n";
-}
-
-
-void print_state(const Knot &K) {
-  std::cout << K.n_crossings << " crossings: ";
-  for (uint16_t i = 0; i < 2 * K.n_crossings; i++) {
-    if (K.visits[i].type() == VisitType::under)
-        continue;
-    std::cout << "(" << i << ", " << K.visits[i].mate << ", " << int16_t(K.visits[i].flags) << ") ";
-  }
-  std::cout << "\n" << std::flush;
-}
-
-int main() {
+void test() {
   using std::uint16_t;
 
   static uint16_t comp[1] = {0};
 
-  // Storage for n_comp_crossings + visits. Adjust MAX_CROSSINGS if needed.
-
-  static constexpr uint16_t N_KNOTS = 10;
-  static constexpr uint16_t mem_per_knot = 1 + 2 * MAX_CROSSINGS * (sizeof(Visit) / sizeof(uint16_t) + 1);
-
-  static uint16_t storage[mem_per_knot * N_KNOTS];
-
+  static Visit no_visits[0];
 
   // Initialize as unknot with 0 crossings
-  Knot unknot(0, comp, reinterpret_cast<Visit *>(storage));
+  Knot unknot(0, comp, no_visits);
 
-  Knot twist = unknot.apply_move(0, 
-    ReidemeisterMove::R1_pos(Orientation::pos, VisitType::over), 
-    reinterpret_cast<uint16_t *>(storage + mem_per_knot));
+  Knot twist = unknot.apply_move(
+      0, ReidemeisterMove::R1_pos(Orientation::pos, VisitType::over));
 
   Knot snowman = twist.apply_move(
-      0 , ReidemeisterMove::R1_pos(Orientation::pos, VisitType::over),
-      reinterpret_cast<uint16_t *>(storage + 2 * mem_per_knot));
+      0, ReidemeisterMove::R1_pos(Orientation::pos, VisitType::over));
 
-  print_state(snowman);
-  print_dowker(snowman);
+  snowman.print_state();
+  snowman.print_dowker();
 
   //   Knot snowman_ = twist.apply_move(
   //       1, ReidemeisterMove::R1_pos(Orientation::neg, VisitType::under),
   //       reinterpret_cast<uint16_t *>(storage + 3 * mem_per_knot));
 
-  Knot triforce = snowman.apply_move(
-      1, ReidemeisterMove::R1_pos(Orientation::neg, VisitType::under),
-      reinterpret_cast<uint16_t *>(storage + 4 * mem_per_knot));
-
-  print_state(triforce);
-  print_dowker(triforce);
-
+  Knot triforce = snowman.apply_move(1, ReidemeisterMove::R1_pos(Orientation::neg, VisitType::under));
+  
+  triforce.print_state();
+  triforce.print_dowker();
   Knot triforce_ = triforce.apply_move(
-      1, ReidemeisterMove::R3(Direction::next, Direction::prev),
-      reinterpret_cast<uint16_t *>(storage + 5 * mem_per_knot));
+      1, ReidemeisterMove::R3(Direction::next, Direction::prev));
+  triforce_.print_state();
+  triforce_.print_dowker();
 
-  print_state(triforce_);
-  print_dowker(triforce_);
+  Knot amir = triforce_.apply_move(1,ReidemeisterMove::R2_pos(VisitType::over, Direction::prev,Direction::next));
 
-  Knot amir = triforce_.apply_move(
-      1, ReidemeisterMove::R2_pos(Direction::prev, Direction::next),
-      reinterpret_cast<uint16_t *>(storage + 6 * mem_per_knot));
+  std::cout << "AMIR" << std::endl;
+  amir.print_state();
+  amir.print_dowker();
 
-  print_state(amir);
-  print_dowker(amir);
+  Knot kolic = amir.apply_move(4, ReidemeisterMove::R2_neg());
 
-  Knot kolic = amir.apply_move(4, ReidemeisterMove::R2_neg(),
-      reinterpret_cast<uint16_t *>(storage + 7 * mem_per_knot));
+  kolic.print_state();
+  kolic.print_dowker();
 
-  print_state(kolic);
-  print_dowker(kolic);
+  Knot kms = kolic.apply_move(2, ReidemeisterMove::R3(Direction::prev, Direction::next));
 
-  Knot kms =
-      kolic.apply_move(2, ReidemeisterMove::R3(Direction::prev,Direction::next),
-      reinterpret_cast<uint16_t *>(storage + 8 * mem_per_knot));
+  kms.print_state();
+  kms.print_dowker();
 
- 
-  print_state(kms);
-  print_dowker(kms);
+  std::cout << "SHIFTS" << std::endl;
+  static constexpr uint16_t pseudo_n = 5;
+  static uint16_t pseudo_comp[1] = {5};
+  for (uint16_t shift = 0; shift < 2 * pseudo_n; shift++) {
+    static Visit pseudo_visits[2 * pseudo_n];
+    for (uint16_t i = 0; i < 2 * pseudo_n; i++) {
+      uint16_t idx = ((i - shift) + 2 * pseudo_n) % (2 * pseudo_n);
+      pseudo_visits[i].flags = amir.visits[idx].flags;
+      pseudo_visits[i].mate = (amir.visits[idx].mate + shift) % (2 * pseudo_n);
+    }
+    Knot pseudo = Knot(pseudo_n, pseudo_comp, pseudo_visits);
+
+    pseudo.print_state();
+    pseudo.print_dowker();
+  }
+}
+
+Knot amirs_knot() {
+  static constexpr uint16_t n_crossings = 4;
+  static uint16_t comp[1] = {n_crossings};
+  static Visit visits[2 * n_crossings] = {
+      Visit(3, Orientation::neg, VisitType::over),
+      Visit(6, Orientation::pos, VisitType::under),
+      Visit(5, Orientation::pos, VisitType::over),
+      Visit(0, Orientation::neg, VisitType::under),
+      Visit(7, Orientation::pos, VisitType::under),
+      Visit(2, Orientation::pos, VisitType::under),
+      Visit(1, Orientation::pos, VisitType::over),
+      Visit(4, Orientation::pos, VisitType::over)};
+  return Knot(n_crossings, comp, visits);
+}
+
+int main() {
+  Knot amirs_knot_ = amirs_knot();
+  amirs_knot_.print_state();
+  amirs_knot_.print_dowker();
+
+  auto start = Clock::now();
+  GreedyResult amirs_undone = greedy_minimize_crossings(amirs_knot_, 100000);
+  auto end = Clock::now();
+
+  auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
+
+  amirs_undone.best.print_state();
+  amirs_undone.best.print_dowker();
+
+  for (auto m : amirs_undone.path) {
+    std::cout << m.move << " on vertex " << m.v << std::endl;
+  }
+
+  std::cout << "Time taken: " << ns << " ns" << std::endl;
   return 0;
 }
