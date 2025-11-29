@@ -229,8 +229,7 @@ private:
     return res;
   }
 
-  inline bool is_triangle(uint16_t a_c, Direction dir_a,
-                          Direction dir_c) const noexcept {
+  inline bool is_triangle(uint16_t a_c, Direction dir_a, Direction dir_c) const noexcept {
     const uint8_t flag_ac = visits[a_c].crossing_flags();
     const uint16_t c_a = visits[a_c].mate; // flag_b: A -> C
     const uint16_t a_b = iter(a_c, dir_a);
@@ -382,10 +381,14 @@ public: // constructors
     const uint16_t a =
         (visits[2 * v].type() == VisitType::over) ^ under ? 2 * v : mate(2 * v);
 
+
+    #ifdef DEBUG
     if (!is_valid_move(a, move)) [[unlikely]] {
       std::cerr << "Invalid move: " << move << " at " << a << std::endl;
       throw std::runtime_error("Invalid move");
     }
+    #endif
+
     if constexpr (dynamic) {
       return Link<static_n_components>(*this, a, move, nullptr);
     } else {
@@ -541,8 +544,7 @@ public: // constructors
     dec_comps(a1, a2);
 
     auto depoke = [&link, &excluded](uint16_t i) {
-      return Visit(depoking_index<4>(excluded, link.visits[i].mate),
-                   link.visits[i].flags);
+      return Visit(depoking_index<4>(excluded, link.visits[i].mate), link.visits[i].flags);
     };
 
     std::sort(excluded, excluded + 4);
@@ -559,8 +561,7 @@ public: // constructors
     compute_all_moves(); // TODO: replace with a more efficient implementation
   }
 
-  void R2_pos(const Link<static_n_components> &link, uint16_t a, uint16_t b,
-              bool collinear, Orientation sign) noexcept { // a is over
+  void R2_pos(const Link<static_n_components> &link, uint16_t a, uint16_t b, bool collinear, Orientation sign) noexcept { // a is over
     const uint16_t min_ = std::min(a, b);
     const uint16_t max_ = std::max(a, b);
 
@@ -784,7 +785,7 @@ public: // constructors
           << " != " << n_crossings << "\n";
       violated = true;
     }
-    
+
     if (violated) {
       throw std::runtime_error(res.str());
     }

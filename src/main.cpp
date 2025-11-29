@@ -93,11 +93,8 @@ int main() {
   amirs_knot_.print_state();
   amirs_knot_.print_dowker();
 
-  auto start = Clock::now();
-  GreedyResult amirs_undone = greedy_minimize_crossings(amirs_knot_, 100000);
-  auto end = Clock::now();
 
-  auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
+  GreedyResult amirs_undone = greedy_minimize_crossings(amirs_knot_, 100000);
 
   amirs_undone.best.print_state();
   amirs_undone.best.print_dowker();
@@ -105,7 +102,5 @@ int main() {
   for (auto m : amirs_undone.path) {
     std::cout << m.move << " on vertex " << m.v << std::endl;
   }
-
-  std::cout << "Time taken: " << ns << " ns" << std::endl;
   return 0;
 }

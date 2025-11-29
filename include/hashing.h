@@ -50,8 +50,7 @@ template <class F> uint64_t circular_hash(const F &f, uint16_t n) {
 
   uint64_t hash = seed;
   for (uint16_t i = 0; i < n; ++i) {
-    uint16_t idx =
-        (i + shift < n) ? uint16_t(i + shift) : uint16_t(i + shift - n);
+    uint16_t idx = (i + shift < n) ? uint16_t(i + shift) : uint16_t(i + shift - n);
     uint64_t value = static_cast<uint64_t>(f(idx));
     hash = mix(hash, value, seed);
   }

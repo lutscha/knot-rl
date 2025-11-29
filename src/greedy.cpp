@@ -1,9 +1,10 @@
-#include "../include/arena.h"
 #include "../include/knot.h"
+#include <chrono>
 #include <queue>
 #include <unordered_map>
-#include <unordered_set>
 #include <vector>
+
+using Clock = std::chrono::steady_clock;
 
 struct KnotCmp {
   bool operator()(const Knot &a, const Knot &b) const noexcept {
@@ -12,6 +13,7 @@ struct KnotCmp {
 
     if (a.hash_ != b.hash_) [[likely]]
       return a.hash_ > b.hash_;
+
     return false;
   }
 };
@@ -25,18 +27,26 @@ GreedyResult greedy_minimize_crossings(Knot start, std::size_t max_expansions) {
   using PQ = std::priority_queue<Knot, std::vector<Knot>, KnotCmp>;
   using Hash = uint64_t;
 
-  std::unordered_set<Hash> visited;
-  visited.reserve(max_expansions);
+  struct ParentInfo {
+    Hash parent;
+    AvailableMove move; // move that produced this state from parent
+  };
 
-  std::unordered_map<Hash, Hash> parent;
-  std::unordered_map<Hash, AvailableMove> parent_move;
-  parent.reserve(max_expansions);
-  parent_move.reserve(max_expansions);
+  // parent_map presence == “visited”
+  std::unordered_map<Hash, ParentInfo> parent_map;
+  parent_map.reserve(max_expansions);
+  parent_map.max_load_factor(0.7f);
 
   const Hash start_hash = start.hash_;
-  visited.insert(start_hash);
+  // root: parent = itself, move is dummy and never read
+  parent_map.emplace(
+      start_hash,
+      ParentInfo{start_hash, AvailableMove(0, ReidemeisterMove::R1_neg())});
 
-  PQ pq;
+  // Pre-reserve underlying storage for the heap
+  std::vector<Knot> heap_storage;
+  heap_storage.reserve(max_expansions + 1);
+  PQ pq{KnotCmp{}, std::move(heap_storage)};
   pq.push(start);
 
   Knot best = start;
@@ -46,24 +56,23 @@ GreedyResult greedy_minimize_crossings(Knot start, std::size_t max_expansions) {
   while (!pq.empty() && expansions < max_expansions) {
     Knot cur = pq.top();
     pq.pop();
-    Hash cur_hash = cur.hash_;
+    const Hash cur_hash = cur.hash_;
 
     if (cur.n_crossings < best.n_crossings) {
       best = cur;
       best_hash = cur_hash;
-    }
+    };
 
     ++expansions;
 
     // 1) Direct moves from the iterator
     for (auto m : cur.moves()) {
       Knot child = cur.apply_move(m.v, m.move);
-      Hash h = child.hash_;
-      if (!visited.insert(h).second)
-        continue;
+      const Hash h = child.hash_;
 
-      parent.emplace(h, cur_hash);
-      parent_move.emplace(h, m); // no default-ctor needed
+      auto [it, inserted] = parent_map.emplace(h, ParentInfo{cur_hash, m});
+      if (!inserted)
+        continue; // already visited
       pq.push(std::move(child));
     }
 
@@ -73,16 +82,17 @@ GreedyResult greedy_minimize_crossings(Knot start, std::size_t max_expansions) {
       for (VisitType type : {VisitType::over, VisitType::under}) {
         for (Direction dir_over : {Direction::next, Direction::prev}) {
           for (Direction dir_under : {Direction::next, Direction::prev}) {
-            ReidemeisterMove mv =
-                ReidemeisterMove::R2_pos(type, dir_over, dir_under);
+
+            ReidemeisterMove mv = ReidemeisterMove::R2_pos(type, dir_over, dir_under);
 
             Knot child = cur.apply_move(v, mv);
-            Hash h = child.hash_;
-            if (!visited.insert(h).second)
-              continue;
 
-            parent.emplace(h, cur_hash);
-            parent_move.emplace(h, AvailableMove(v, mv));
+            const Hash h = child.hash_;
+
+            auto [it, inserted] = parent_map.emplace(
+                h, ParentInfo{cur_hash, AvailableMove(v, mv)});
+            if (!inserted)
+              continue; // already visited
             pq.push(std::move(child));
           }
         }
@@ -92,17 +102,20 @@ GreedyResult greedy_minimize_crossings(Knot start, std::size_t max_expansions) {
 
   // Reconstruct path from start_hash to best_hash.
   std::vector<AvailableMove> path;
-  Hash h = best_hash;
+  path.reserve(best.n_crossings + 8); // rough guess; better than nothing
+
+
+    Hash h = best_hash;
   while (h != start_hash) {
-    auto it_p = parent.find(h);
-    auto it_mv = parent_move.find(h);
-    if (it_p == parent.end() || it_mv == parent_move.end()) {
-      break; // inconsistent map; abort reconstruction
-    }
-    path.push_back(it_mv->second);
-    h = it_p->second;
+    auto it = parent_map.find(h);
+    if (it == parent_map.end())
+      break; // should not happen; abort reconstruction
+
+    const ParentInfo &info = it->second;
+    path.push_back(info.move);
+    h = info.parent;
   }
   std::reverse(path.begin(), path.end());
 
-  return GreedyResult{best, std::move(path)};
+  return GreedyResult{std::move(best), std::move(path)};
 }
