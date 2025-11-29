@@ -2,7 +2,7 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 import math
-from torch_geometric.nn import GCNConv, global_mean_pool
+from torch_geometric.nn import global_mean_pool
 
 class KnotAttention(nn.Module):
     """
@@ -86,7 +86,7 @@ class KnotTransformerLayer(nn.Module):
     Args:
         input_dim (int): Dimension of the input node features.
             Must be divisible by `heads` to ensure dimension alignment.
-        d_k (int): Dimension of the key/query/value vectors per head.
+        d_k (int): Dimension of the query and key vectors per head.
         heads (int, optional): Number of attention heads. Defaults to 2.
         d_ff (int, optional): Hidden dimension of the Feed-Forward network. 
             Defaults to 4 * input_dim.
@@ -137,14 +137,36 @@ class KnotTransformerLayer(nn.Module):
 
         return x
 
-class AlphaKnotNetwork(nn.Module):
+class AlphaKnot(nn.Module):
     """
+    Policy and value network for MCTS. It utilizes the KnotTransformerLayer for
+    a common embedding module on which the policy and value heads operate.
 
+    The model processes a batch of disjoint graphs, applies a Transformer-based
+    GNN to extract node embeddings, aggregates them for a graph-level value prediction,
+    and projects them for node-level action logits.
+
+    Args:
+        model_dim (int): Dimension of the node initial embeddings (input features).
+        d_k (int): Dimension of the key and query vectors in the Multi-Head Attention mechanism.
+        transformer_layers (int, optional): Number of stacked KnotTransformerLayer blocks.
+            Defaults to 4.
+        heads (int, optional): Number of attention heads. Defaults to 2.
+            The number of heads should divide the input_dim since d_v = input_dim // heads.
+        moves (int, optional): Size of the action space per node (number of output classes).
+            Defaults to 14.
+        d_ff (int, optional): Dimension of the feed-forward network within the transformer.
+            If None, defaults to 4 * model_dim.
+        value_dim (int, optional): Hidden dimension size for the Value Head MLP.
+            If None, defaults to model_dim * 2.
+        policy_dim (int, optional): Hidden dimension size for the Policy Head MLP.
+            If None, defaults to model_dim * 2.
     """
-    def __init__(self, model_dim, d_k, transformer_layers=4, heads=2, d_ff=None, value_dim=None):
+    def __init__(self, model_dim, d_k, transformer_layers=4, heads=2, moves = 14, d_ff=None, value_dim=None, policy_dim=None):
         super().__init__()
         
-        self.value_dim = value_dim if value_dim is not None else model_dim*4
+        self.value_dim = value_dim if value_dim is not None else model_dim*2
+        self.policy_dim = policy_dim if policy_dim is not None else model_dim*2
 
         self.transformer_pass = nn.ModuleList([
             KnotTransformerLayer(input_dim=model_dim, d_k=d_k, heads=heads, d_ff=d_ff)
@@ -157,128 +179,46 @@ class AlphaKnotNetwork(nn.Module):
             nn.Linear(self.value_dim, 1)
         )
 
-    def forward(self, x, adjacency_matrix, mask, batch):
+        self.policy_head = nn.Sequential(
+            nn.Linear(model_dim, self.policy_dim),
+            nn.ReLU(),
+            nn.Linear(self.policy_dim, moves)
+        )
+
+    def forward(self, batch):
+        """
+        Forward pass for a batch of disjoint graphs.
+
+        Args:
+            batch (torch_geometric.data.Batch): A PyG Batch object of KnotData instances.
+            It should contain:
+                - x (Tensor): Node features of shape (N_total, model_dim).
+                - neighbor_index (Tensor): Adjacency/Neighbor indices used by the transformer.
+                - mask (BoolTensor): Action mask of shape (N_total, moves). 
+                  True indicates an invalid move that should be masked out.
+                - batch (LongTensor): Batch vector of shape (N_total,) mapping each 
+                  node to its graph index.
+
+        Returns:
+            Tuple[Tensor, Tensor]:
+                - logits (Tensor): Node-level action logits of shape (N_total, moves).
+                  Invalid moves are masked with -inf.
+                - values (Tensor): Graph-level value estimates of shape (Batch_Size,).
+        """
+        x = batch.x
+        neighbor_index = batch.neighbor_index
+        mask = batch.mask
+        batch_index = batch.batch
 
         for layer in self.transformer_pass:
-            x = layer(x, adjacency_matrix)
+            x = layer(x, neighbor_index)
         
-        graph_embedding = global_mean_pool(x, batch)
+        graph_embedding = global_mean_pool(x, batch_index)
 
         values = self.value_head(graph_embedding).squeeze(-1)
 
-        # TODO: Policy network implementation
+        logits = self.policy_head(x)
 
-        return values
+        logits = logits.masked_fill(mask, float('-inf'))
 
-### Experimental Models ###
-
-class KnotMultiTransformerClassifier(nn.Module):
-    """
-    A deep Relational Transformer model for classifying knot diagrams (e.g., Trivial vs. Non-Trivial).
-
-    This model integrates domain-specific positional encodings with a stack of 
-    KnotTransformer layers. It aggregates local topological features into a 
-    global representation to make a binary classification decision.
-
-    The architecture follows:
-    1. **Transformer Stack:** $L$ layers of Relational Multi-Head Attention and 
-       Feed-Forward networks.
-    2. **Global Pooling:** Adaptive Average Pooling to collapse variable node 
-       counts into a fixed-size vector.
-    3. **Classifier Head:** A MLP projecting the global vector to logits.
-
-    Args:
-        num_layers (int): The number of Transformer layers to stack.
-        input_dim (int): The total dimension of the node embeddings ($d_{model}$).
-            **Constraint:** Must be divisible by `lcm(2, heads)`. 
-            - Divisible by 2 because the encoder concatenates two halves.
-            - Divisible by `heads` to split features evenly in attention.
-        d_k (int): The dimension of the query/key vectors per head.
-        heads (int, optional): Number of attention heads. Defaults to 2.
-        d_ff (int, optional): Dimension of the Feed-Forward internal layer. 
-            Defaults to 4 * input_dim.
-        max_encode_len (int, optional): Max length for positional encoding. Defaults to 500.
-        n_encode (int, optional): Frequency base for positional encoding. Defaults to 10000.
-    """
-    def __init__(self, num_layers, input_dim, d_k, heads=2, d_ff=None, max_encode_len=500, n_encode=10000):
-        super().__init__()
-        
-        # --- Constraints Check ---
-        if input_dim % 2 != 0:
-            raise ValueError(f"input_dim ({input_dim}) must be divisible by 2 for the PositionalEncoding concatenation.")
-        if input_dim % heads != 0:
-            raise ValueError(f"input_dim ({input_dim}) must be divisible by heads ({heads}) for Attention splitting.")
-
-        self.layers = nn.ModuleList([
-            KnotTransformerLayer(input_dim, d_k, heads, d_ff)
-            for _ in range(num_layers)
-        ])
-        
-        self.gap = nn.AdaptiveAvgPool1d(1)
-
-        self.classifier = nn.Sequential(
-            nn.Linear(input_dim, 2*input_dim),
-            nn.ReLU(),
-            nn.Linear(2*input_dim, 2) # 0 = Non-Trivial, 1 = Trivial
-        )
-    
-    def forward(self, x, adjacency_matrix):
-        """"
-        Processes a raw knot diagram representation into classification logits.
-
-        Args:
-            x (torch.Tensor): Raw node specifications. 
-                Shape: `(num_nodes, 2)`
-                - Column 0: Dowker sequence positions.
-                - Column 1: Over/Under/Sign information (depending on Embedding impl).
-            adjacency_matrix (torch.Tensor): Indices of the 4 distinct neighbors 
-                for each node.
-                Shape: `(num_nodes, 4)`
-
-        Returns:
-            torch.Tensor: Unnormalized logits for classification.
-                Shape: `(1, 2)` (assuming batch size 1 for single graph inference)
-                - Index 0: Score for Class 0 (e.g., Non-Trivial)
-                - Index 1: Score for Class 1 (e.g., Trivial)
-        """
-        for layer in self.layers:
-            x = layer(x, adjacency_matrix)
-            
-        global_representation = self.gap(x.unsqueeze(0).permute(0, 2, 1)).squeeze(-1)
-        
-        logits = self.classifier(global_representation)
-        
-        return logits
-
-class ValueGCN(nn.Module):
-    """
-    GCN-based model for binary classification of knot diagrams.
-    """
-    def __init__(self, input_dim, hidden_dim):
-        super(ValueGCN, self).__init__()
-
-        self.conv1 = GCNConv(input_dim*2, hidden_dim)
-        self.conv2 = GCNConv(hidden_dim, hidden_dim)
-
-        self.classifier = torch.nn.Linear(hidden_dim, 1)
-
-    def forward(self, x, edge_index):
-        """
-        Args:
-            x: Node features (num_nodes, input_dim)
-            edge_index: Graph connectivity (2, num_edges)
-            batch: Batch vector mapping each node to a specific graph in the batch
-                   (num_nodes,) - needed for pooling
-        """
-        x = self.pe_encoder(x)
-        x = self.conv1(x, edge_index)
-        x = F.relu(x)
-        x = self.conv2(x, edge_index)
-        x = F.relu(x)
-
-        x = global_mean_pool(x, None)
-
-        x = self.classifier(x)
-        
-        return F.sigmoid(x)
-
+        return logits, values

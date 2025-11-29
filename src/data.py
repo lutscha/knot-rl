@@ -1,7 +1,11 @@
-import torch
-from torch import nn
 import math
-from torch_geometric.data import Data, Dataset
+import torch
+import torch.nn.functional as F
+
+from torch import nn
+from torch_geometric.data import Data
+from torch_geometric.utils import softmax as scatter_softmax
+
 
 class PositionalEncoding(nn.Module):
     """
@@ -95,3 +99,24 @@ class KnotData(Data):
         if key == 'neighbor_index':
             return 0
         return super().__cat_dim__(key, value, *args, **kwargs)
+
+def distribution_from_logits(logits, ptr):
+    """
+    Args:
+        logits: (N_total, M) 
+        ptr: (B + 1) Graph pointers (e.g. [0, 5, 12...])
+    """
+    N_total, M = logits.shape
+    logits_flat = logits.view(-1)
+    
+    ptr_scaled = ptr * M 
+    
+    probs_flat = scatter_softmax(logits_flat, ptr=ptr_scaled)
+    
+    # TODO: see what format the MCTS will ask for the policies
+    probs_list = [
+        probs_flat[ptr_scaled[i] : ptr_scaled[i+1]] 
+        for i in range(len(ptr_scaled) - 1)
+    ]
+    
+    return probs_flat, probs_list
