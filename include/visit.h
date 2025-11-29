@@ -135,6 +135,9 @@ struct Visit {
   static constexpr uint8_t R3_SHIFT = 3;
   static constexpr uint8_t TYPE_SHIFT = 7;
 
+  static constexpr uint8_t MOVES_FIRST_BIT = R1_NEG_SHIFT;
+  static constexpr uint8_t MOVES_LAST_BIT = R3_SHIFT + 4;
+
   static constexpr uint8_t DIR_SHIFT(const Direction dir_a, const Direction dir_c) noexcept {
     return R3_SHIFT + uint8_t(dir_a) + 2 * uint8_t(dir_c);
   }
@@ -146,6 +149,20 @@ struct Visit {
   static constexpr uint8_t CROSSING_MASK = TYPE | SIGN;
   static constexpr uint8_t R3_MASK = 0b1111 << R3_SHIFT;
   static constexpr uint8_t MOVES_MASK = R1_NEG | R2_NEG | R3_MASK;
+
+  static inline ReidemeisterMove GET_DIRECT_MOVE(uint8_t bit) noexcept {
+    if (bit < MOVES_FIRST_BIT || bit > MOVES_LAST_BIT) [[unlikely]] {
+      std::cerr << "Invalid move bit: " << bit << std::endl;
+    }
+
+    if (bit == 1) {return ReidemeisterMove::R1_neg();}
+    if (bit == 2) {return ReidemeisterMove::R2_neg();}
+
+    uint dirs_shift = bit - 3;
+    Direction dir_over = Direction((dirs_shift >> 1) & 1);
+    Direction dir_under = Direction(dirs_shift & 1);
+    return ReidemeisterMove::R3(dir_over, dir_under);
+  }
 
   uint16_t mate;
   uint8_t flags;
@@ -180,4 +197,15 @@ struct Visit {
   inline Orientation sign() const noexcept {
     return Orientation((flags >> SIGN_SHIFT) & 1);
   }
+
+  inline bool has_move() const noexcept {
+    return moves_flags() != 0;
+  }
 };
+
+
+struct AvailableMove {
+    uint16_t v;
+    ReidemeisterMove move;
+    AvailableMove(uint16_t v, ReidemeisterMove move) : v(v), move(move) {}
+};  
