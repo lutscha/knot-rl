@@ -33,8 +33,9 @@ void test() {
   //       1, ReidemeisterMove::R1_pos(Orientation::neg, VisitType::under),
   //       reinterpret_cast<uint16_t *>(storage + 3 * mem_per_knot));
 
-  Knot triforce = snowman.apply_move(1, ReidemeisterMove::R1_pos(Orientation::neg, VisitType::under));
-  
+  Knot triforce = snowman.apply_move(
+      1, ReidemeisterMove::R1_pos(Orientation::neg, VisitType::under));
+
   triforce.print_state();
   triforce.print_dowker();
   Knot triforce_ = triforce.apply_move(
@@ -42,7 +43,9 @@ void test() {
   triforce_.print_state();
   triforce_.print_dowker();
 
-  Knot amir = triforce_.apply_move(1,ReidemeisterMove::R2_pos(VisitType::over, Direction::prev,Direction::next));
+  Knot amir = triforce_.apply_move(
+      1, ReidemeisterMove::R2_pos(VisitType::over, Direction::prev,
+                                  Direction::next));
 
   std::cout << "AMIR" << std::endl;
   amir.print_state();
@@ -53,7 +56,8 @@ void test() {
   kolic.print_state();
   kolic.print_dowker();
 
-  Knot kms = kolic.apply_move(2, ReidemeisterMove::R3(Direction::prev, Direction::next));
+  Knot kms = kolic.apply_move(
+      2, ReidemeisterMove::R3(Direction::prev, Direction::next));
 
   kms.print_state();
   kms.print_dowker();
@@ -90,7 +94,8 @@ Knot amirs_knot() {
   return Knot(n_crossings, comp, visits);
 }
 
-Knot culprit_unknot() { static constexpr uint16_t n_crossings = 10;
+Knot culprit_unknot() {
+  static constexpr uint16_t n_crossings = 10;
   static uint16_t comp[1] = {n_crossings};
   static Visit visits[2 * n_crossings] = {
       Visit(13, Orientation::neg, VisitType::under),
@@ -103,13 +108,13 @@ Knot culprit_unknot() { static constexpr uint16_t n_crossings = 10;
       Visit(14, Orientation::pos, VisitType::over),
       Visit(15, Orientation::neg, VisitType::under),
       Visit(16, Orientation::neg, VisitType::over),
-     Visit(19, Orientation::pos, VisitType::over),
-     Visit(2, Orientation::pos, VisitType::over),
+      Visit(19, Orientation::pos, VisitType::over),
+      Visit(2, Orientation::pos, VisitType::over),
       Visit(3, Orientation::pos, VisitType::under),
       Visit(0, Orientation::neg, VisitType::over),
       Visit(7, Orientation::pos, VisitType::under),
       Visit(8, Orientation::neg, VisitType::over),
-     Visit(9, Orientation::neg, VisitType::under),
+      Visit(9, Orientation::neg, VisitType::under),
       Visit(6, Orientation::neg, VisitType::over),
       Visit(5, Orientation::neg, VisitType::under),
       Visit(10, Orientation::pos, VisitType::under)};
@@ -117,7 +122,7 @@ Knot culprit_unknot() { static constexpr uint16_t n_crossings = 10;
 };
 
 Knot culprit_light() {
-static constexpr uint16_t n_crossings = 12;
+  static constexpr uint16_t n_crossings = 12;
   static uint16_t comp[1] = {n_crossings};
   static Visit visits[2 * n_crossings] = {
       Visit(15, Orientation::neg, VisitType::under),
@@ -148,7 +153,7 @@ static constexpr uint16_t n_crossings = 12;
   return Knot(n_crossings, comp, visits);
 };
 
-void culprit(){
+void culprit() {
   Knot culprit_unknot_ = culprit_light();
   culprit_unknot_.print_state();
   culprit_unknot_.print_dowker();
@@ -168,9 +173,9 @@ int main() {
   if (!ifs) {
     std::cerr << "Failed to open" << std::endl;
   } else {
-    nlohmann::json j;
-    ifs >> j;
-    Knot knot = link_from_json<1>(j);
+    std::string json_str((std::istreambuf_iterator<char>(ifs)),
+                         std::istreambuf_iterator<char>());
+    Knot knot = deserialize_link<1>(json_str);
     knot.print_state();
     knot.print_dowker();
   }
