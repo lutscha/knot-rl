@@ -4,6 +4,104 @@ import torch.nn.functional as F
 import math
 from torch_geometric.nn import global_mean_pool
 
+class BatchPositionalEncoding(nn.Module):
+    """
+    Implements positional encoding for nodes in a graph diagram representation.
+
+    It treats the Dowker sequence positions as temporal positions and encodes 
+    them using sine and cosine functions. It takes a batch of Dowker sequences
+    and the batch_ptr vector. The encoding follows the standard formula:
+
+    $$
+    P(k, 2i) = \\sin\\left(\\frac{k}{n^{2i/d_{model}}}\\right)
+    $$
+    $$
+    P(k, 2i+1) = \\cos\\left(\\frac{k}{n^{2i/d_{model}}}\\right)
+    $$
+
+    Args:
+        d_model (int): Dimension of the model (embedding size). Note that since each
+        node appears twice, their final embedding will be of size 2 * d_model as the
+        over and under encodings are concantenated. d_model should be even.
+        max_len (int, optional): Maximum length of Dowker sequence. Should be 
+            2 * max crossings expected. Defaults to 500.
+        n (int, optional): Base for the positional encoding frequency. 
+            Defaults to 10000.
+
+    Attributes:
+        pe (torch.Tensor): The learnable positional encoding buffer of shape 
+            (max_len, d_model).
+    """
+    def __init__(self, d_model, max_len=2000, n=10000):
+        super().__init__()
+
+        self.d_model = d_model
+        pe = torch.zeros(max_len, d_model)
+        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(n) / d_model))
+        
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        
+        self.register_buffer('pe', pe)
+    def forward(self, dowker, ptr):
+        """
+        Encodes a batch of disjoint Dowker sequences into node embeddings.
+
+        This method handles the conversion from global batch indices back to local 
+        sequence positions to retrieve the correct positional encodings. It then 
+        scatters these encodings into a node-centric format, concatenating the 
+        'over' and 'under' embeddings for each node.
+
+        Args:
+            dowker (torch.Tensor): The batched Dowker sequence tensor.
+                Shape: (2 * N_total, 2)
+                - Column 0: Global Node Indices. Because of the custom `__inc__` 
+                  in KnotData, these indices are cumulative across the batch 
+                  (e.g., if Graph 1 has 5 nodes, Node 0 of Graph 2 is index 5).
+                - Column 1: Over/Under flag (0 for Over, 1 for Under).
+            ptr (torch.Tensor): The batch pointer tensor from PyG.
+                Shape: (Batch_Size + 1,)
+                Contains the cumulative count of nodes in the batch (e.g., [0, N1, N1+N2, ...]).
+                Used to determine the start and end of each graph in the dense sequence.
+
+        Returns:
+            torch.Tensor: The computed embeddings for all nodes in the batch.
+                Shape: (N_total, 2 * d_model)
+                Each row corresponds to a specific node (in global order) and contains
+                the concatenation of its 'Over' positional encoding and 'Under' 
+                positional encoding.
+        """
+        
+        N = dowker.size(0) // 2
+        
+        dowker_starts = ptr[:-1] * 2
+
+        nodes_per_graph = ptr[1:] - ptr[:-1]
+        rows_per_graph = nodes_per_graph * 2
+
+        # Provide output_size to prevent CPU-GPU sync
+        shifts = dowker_starts.repeat_interleave(
+            rows_per_graph,
+            output_size=2*N
+        )
+        
+        global_seq = torch.arange(2*N, device=dowker.device)
+        local_seq = global_seq - shifts
+        
+        pe_vecs = self.pe[local_seq]
+        
+        out_flat = torch.empty(N * 2, self.d_model, device=dowker.device)
+        
+        # Instead of 2D indexing out[dowker[:,0], dowker[:,1]], we calculate the 1D index.
+        # Index = Node_ID * 2 + Over_Under_Flag (0 or 1)
+        flat_indices = dowker[:, 0] * 2 + dowker[:, 1]
+        
+        out_flat[flat_indices] = pe_vecs
+        
+        # Memory layout [Node0_Over, Node0_Under, Node1_Over...] matches expected flatten behavior
+        return out_flat.view(N, 2 * self.d_model)
+
 class KnotAttention(nn.Module):
     """
     Multi-head attention mechanism for knot diagrams. This module has a separate
@@ -148,6 +246,7 @@ class AlphaKnot(nn.Module):
 
     Args:
         model_dim (int): Dimension of the node initial embeddings (input features).
+            It must satisfy lcm(2, heads) | model_dim due to embedding size considerations.
         d_k (int): Dimension of the key and query vectors in the Multi-Head Attention mechanism.
         transformer_layers (int, optional): Number of stacked KnotTransformerLayer blocks.
             Defaults to 4.
@@ -167,6 +266,8 @@ class AlphaKnot(nn.Module):
         
         self.value_dim = value_dim if value_dim is not None else model_dim*2
         self.policy_dim = policy_dim if policy_dim is not None else model_dim*2
+
+        self.encoder = BatchPositionalEncoding(model_dim//2)
 
         self.transformer_pass = nn.ModuleList([
             KnotTransformerLayer(input_dim=model_dim, d_k=d_k, heads=heads, d_ff=d_ff)
@@ -205,10 +306,14 @@ class AlphaKnot(nn.Module):
                   Invalid moves are masked with -inf.
                 - values (Tensor): Graph-level value estimates of shape (Batch_Size,).
         """
-        x = batch.x
+
+        dowker = batch.dowker
         neighbor_index = batch.neighbor_index
         mask = batch.mask
         batch_index = batch.batch
+        batch_ptr = batch.ptr
+
+        x = self.encoder(dowker, batch_ptr)
 
         for layer in self.transformer_pass:
             x = layer(x, neighbor_index)
@@ -218,7 +323,7 @@ class AlphaKnot(nn.Module):
         values = self.value_head(graph_embedding).squeeze(-1)
 
         logits = self.policy_head(x)
-
+        
         logits = logits.masked_fill(mask, float('-inf'))
 
         return logits, values
