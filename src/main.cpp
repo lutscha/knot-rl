@@ -2,8 +2,10 @@
 #include "greedy.cpp"
 #include <chrono>
 #include <cstdint>
+#include <fstream>
 #include <iostream>
 
+#include "../include/deserializer.h"
 #include "../include/knot.h"
 
 using Clock = std::chrono::steady_clock;
@@ -88,19 +90,89 @@ Knot amirs_knot() {
   return Knot(n_crossings, comp, visits);
 }
 
-int main() {
-  Knot amirs_knot_ = amirs_knot();
-  amirs_knot_.print_state();
-  amirs_knot_.print_dowker();
+Knot culprit_unknot() { static constexpr uint16_t n_crossings = 10;
+  static uint16_t comp[1] = {n_crossings};
+  static Visit visits[2 * n_crossings] = {
+      Visit(13, Orientation::neg, VisitType::under),
+      Visit(4, Orientation::pos, VisitType::over),
+      Visit(11, Orientation::pos, VisitType::under),
+      Visit(12, Orientation::pos, VisitType::over),
+      Visit(1, Orientation::pos, VisitType::under),
+      Visit(18, Orientation::neg, VisitType::over),
+      Visit(17, Orientation::neg, VisitType::under),
+      Visit(14, Orientation::pos, VisitType::over),
+      Visit(15, Orientation::neg, VisitType::under),
+      Visit(16, Orientation::neg, VisitType::over),
+     Visit(19, Orientation::pos, VisitType::over),
+     Visit(2, Orientation::pos, VisitType::over),
+      Visit(3, Orientation::pos, VisitType::under),
+      Visit(0, Orientation::neg, VisitType::over),
+      Visit(7, Orientation::pos, VisitType::under),
+      Visit(8, Orientation::neg, VisitType::over),
+     Visit(9, Orientation::neg, VisitType::under),
+      Visit(6, Orientation::neg, VisitType::over),
+      Visit(5, Orientation::neg, VisitType::under),
+      Visit(10, Orientation::pos, VisitType::under)};
+  return Knot(n_crossings, comp, visits);
+};
 
+Knot culprit_light() {
+static constexpr uint16_t n_crossings = 12;
+  static uint16_t comp[1] = {n_crossings};
+  static Visit visits[2 * n_crossings] = {
+      Visit(15, Orientation::neg, VisitType::under),
+      Visit(6, Orientation::pos, VisitType::over),
+      Visit(13, Orientation::pos, VisitType::under),
+      Visit(22, Orientation::neg, VisitType::over),
+      Visit(23, Orientation::pos, VisitType::over),
+      Visit(14, Orientation::pos, VisitType::over),
+      Visit(1, Orientation::pos, VisitType::under),
+      Visit(20, Orientation::neg, VisitType::over),
+      Visit(19, Orientation::neg, VisitType::under),
+      Visit(16, Orientation::pos, VisitType::over),
+      Visit(17, Orientation::neg, VisitType::under),
+      Visit(18, Orientation::neg, VisitType::over),
+      Visit(21, Orientation::pos, VisitType::over),
+      Visit(2, Orientation::pos, VisitType::over),
+      Visit(5, Orientation::pos, VisitType::under),
+      Visit(0, Orientation::neg, VisitType::over),
+      Visit(9, Orientation::pos, VisitType::under),
+      Visit(10, Orientation::neg, VisitType::over),
+      Visit(11, Orientation::neg, VisitType::under),
+      Visit(8, Orientation::neg, VisitType::over),
+      Visit(7, Orientation::neg, VisitType::under),
+      Visit(12, Orientation::pos, VisitType::under),
+      Visit(3, Orientation::neg, VisitType::under),
+      Visit(4, Orientation::pos, VisitType::under),
+  };
+  return Knot(n_crossings, comp, visits);
+};
 
-  GreedyResult amirs_undone = greedy_minimize_crossings(amirs_knot_, 100000);
+void culprit(){
+  Knot culprit_unknot_ = culprit_light();
+  culprit_unknot_.print_state();
+  culprit_unknot_.print_dowker();
 
-  amirs_undone.best.print_state();
-  amirs_undone.best.print_dowker();
+  GreedyResult culprit_undone =
+      greedy_minimize_crossings(culprit_unknot_, 10000);
+  culprit_undone.best.print_state();
+  culprit_undone.best.print_dowker();
 
-  for (auto m : amirs_undone.path) {
+  for (auto m : culprit_undone.path) {
     std::cout << m.move << " on vertex " << m.v << std::endl;
+  }
+}
+
+int main() {
+  std::ifstream ifs("knot_data/large_knot.json");
+  if (!ifs) {
+    std::cerr << "Failed to open" << std::endl;
+  } else {
+    nlohmann::json j;
+    ifs >> j;
+    Knot knot = link_from_json<1>(j);
+    knot.print_state();
+    knot.print_dowker();
   }
   return 0;
 }

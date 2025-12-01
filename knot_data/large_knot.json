@@ -1,0 +1,261 @@
+{
+  "n_components": 1,
+  "n_crossings": 21,
+  "n_conn_visits": [
+    42
+  ],
+  "visits": [
+    {
+      "i": 0,
+      "mate": 11,
+      "type": "UNDER",
+      "orientation": "POS"
+    },
+    {
+      "i": 1,
+      "mate": 12,
+      "type": "UNDER",
+      "orientation": "NEG"
+    },
+    {
+      "i": 2,
+      "mate": 35,
+      "type": "UNDER",
+      "orientation": "POS"
+    },
+    {
+      "i": 3,
+      "mate": 36,
+      "type": "UNDER",
+      "orientation": "NEG"
+    },
+    {
+      "i": 4,
+      "mate": 37,
+      "type": "UNDER",
+      "orientation": "POS"
+    },
+    {
+      "i": 5,
+      "mate": 38,
+      "type": "UNDER",
+      "orientation": "NEG"
+    },
+    {
+      "i": 6,
+      "mate": 39,
+      "type": "UNDER",
+      "orientation": "POS"
+    },
+    {
+      "i": 7,
+      "mate": 16,
+      "type": "UNDER",
+      "orientation": "POS"
+    },
+    {
+      "i": 8,
+      "mate": 17,
+      "type": "UNDER",
+      "orientation": "NEG"
+    },
+    {
+      "i": 9,
+      "mate": 40,
+      "type": "UNDER",
+      "orientation": "NEG"
+    },
+    {
+      "i": 10,
+      "mate": 41,
+      "type": "UNDER",
+      "orientation": "POS"
+    },
+    {
+      "i": 11,
+      "mate": 0,
+      "type": "OVER",
+      "orientation": "POS"
+    },
+    {
+      "i": 12,
+      "mate": 1,
+      "type": "OVER",
+      "orientation": "NEG"
+    },
+    {
+      "i": 13,
+      "mate": 32,
+      "type": "OVER",
+      "orientation": "NEG"
+    },
+    {
+      "i": 14,
+      "mate": 33,
+      "type": "UNDER",
+      "orientation": "NEG"
+    },
+    {
+      "i": 15,
+      "mate": 34,
+      "type": "UNDER",
+      "orientation": "POS"
+    },
+    {
+      "i": 16,
+      "mate": 7,
+      "type": "OVER",
+      "orientation": "POS"
+    },
+    {
+      "i": 17,
+      "mate": 8,
+      "type": "OVER",
+      "orientation": "NEG"
+    },
+    {
+      "i": 18,
+      "mate": 31,
+      "type": "UNDER",
+      "orientation": "POS"
+    },
+    {
+      "i": 19,
+      "mate": 30,
+      "type": "UNDER",
+      "orientation": "POS"
+    },
+    {
+      "i": 20,
+      "mate": 25,
+      "type": "UNDER",
+      "orientation": "POS"
+    },
+    {
+      "i": 21,
+      "mate": 26,
+      "type": "UNDER",
+      "orientation": "NEG"
+    },
+    {
+      "i": 22,
+      "mate": 27,
+      "type": "OVER",
+      "orientation": "NEG"
+    },
+    {
+      "i": 23,
+      "mate": 28,
+      "type": "UNDER",
+      "orientation": "NEG"
+    },
+    {
+      "i": 24,
+      "mate": 29,
+      "type": "OVER",
+      "orientation": "NEG"
+    },
+    {
+      "i": 25,
+      "mate": 20,
+      "type": "OVER",
+      "orientation": "POS"
+    },
+    {
+      "i": 26,
+      "mate": 21,
+      "type": "OVER",
+      "orientation": "NEG"
+    },
+    {
+      "i": 27,
+      "mate": 22,
+      "type": "UNDER",
+      "orientation": "NEG"
+    },
+    {
+      "i": 28,
+      "mate": 23,
+      "type": "OVER",
+      "orientation": "NEG"
+    },
+    {
+      "i": 29,
+      "mate": 24,
+      "type": "UNDER",
+      "orientation": "NEG"
+    },
+    {
+      "i": 30,
+      "mate": 19,
+      "type": "OVER",
+      "orientation": "POS"
+    },
+    {
+      "i": 31,
+      "mate": 18,
+      "type": "OVER",
+      "orientation": "POS"
+    },
+    {
+      "i": 32,
+      "mate": 13,
+      "type": "UNDER",
+      "orientation": "NEG"
+    },
+    {
+      "i": 33,
+      "mate": 14,
+      "type": "OVER",
+      "orientation": "NEG"
+    },
+    {
+      "i": 34,
+      "mate": 15,
+      "type": "OVER",
+      "orientation": "POS"
+    },
+    {
+      "i": 35,
+      "mate": 2,
+      "type": "OVER",
+      "orientation": "POS"
+    },
+    {
+      "i": 36,
+      "mate": 3,
+      "type": "OVER",
+      "orientation": "NEG"
+    },
+    {
+      "i": 37,
+      "mate": 4,
+      "type": "OVER",
+      "orientation": "POS"
+    },
+    {
+      "i": 38,
+      "mate": 5,
+      "type": "OVER",
+      "orientation": "NEG"
+    },
+    {
+      "i": 39,
+      "mate": 6,
+      "type": "OVER",
+      "orientation": "POS"
+    },
+    {
+      "i": 40,
+      "mate": 9,
+      "type": "OVER",
+      "orientation": "NEG"
+    },
+    {
+      "i": 41,
+      "mate": 10,
+      "type": "OVER",
+      "orientation": "POS"
+    }
+  ]
+}
