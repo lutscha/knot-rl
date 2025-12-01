@@ -27,11 +27,11 @@ static constexpr uint16_t MAX_DYNAMIC_COMPONENTS = 100;
 struct Vertex {
   uint16_t under[2];
   uint16_t over[2];
-  uint8_t flags;
+  uint16_t flags;
 
   inline Vertex() : under{0, 0}, over{0, 0}, flags(0) {}
 
-  Vertex(uint16_t under[2], uint16_t over[2], uint8_t flags) : flags(flags) {
+  Vertex(uint16_t under[2], uint16_t over[2], uint16_t flags) : flags(flags) {
     for (uint16_t i = 0; i < 2; i++) {
       this->under[i] = under[i];
       this->over[i] = over[i];
@@ -47,9 +47,7 @@ public:
 
   uint16_t n_crossings;
   uint64_t hash_;
-  uint16_t static_n_conn_crossings[static_n_components > 0
-                                       ? static_n_components
-                                       : 1];
+  uint16_t static_n_conn_crossings[static_n_components > 0 ? static_n_components: 1];
   uint16_t dynamic_components_cnt = 0;
   uint16_t *dynamic_n_conn_crossings = nullptr;
   Visit visits[2 * MAX_CROSSINGS];
@@ -94,9 +92,21 @@ public:
 
 private:
   static inline int16_t N_CROSSING_CHANGE(ReidemeisterKind kind) noexcept {
-    if (kind == ReidemeisterKind::R3)
+    switch (kind) {
+    case ReidemeisterKind::R1_neg:
+      return -1;
+    case ReidemeisterKind::R1_pos:
+      return 1;
+    case ReidemeisterKind::R2_neg:
+      return -2;
+    case ReidemeisterKind::R2_pos:
+      return 2;
+    case ReidemeisterKind::R3:
       return 0;
-    return int16_t(kind);
+    case ReidemeisterKind::R4_pos:
+      return 2;
+    }
+    return 0;
   }
 
   inline uint16_t new_n_crossings(ReidemeisterKind kind) const {
@@ -106,7 +116,7 @@ private:
 
   inline uint16_t mate(uint16_t a) const noexcept { return visits[a].mate; }
 
-  inline uint8_t flags(uint16_t a) const noexcept { return visits[a].flags; }
+  inline uint16_t flags(uint16_t a) const noexcept { return visits[a].flags; }
 
   inline bool are_adjacent(uint16_t a, uint16_t b) const noexcept {
     return next(a) == b || prev(a) == b;
@@ -153,9 +163,7 @@ private:
     return a - shift;
   }
 
-  static inline uint16_t poking_index(const uint16_t added_min,
-                                      const uint16_t added_max,
-                                      const uint16_t c) noexcept {
+  static inline uint16_t poking_index(const uint16_t added_min, const uint16_t added_max,const uint16_t c) noexcept {
     const uint16_t shift = 2 * (c >= added_min) + 2 * (c + 2 >= added_max);
     return c + shift;
   }
@@ -230,13 +238,13 @@ private:
   }
 
   inline bool is_triangle(uint16_t a_c, Direction dir_a, Direction dir_c) const noexcept {
-    const uint8_t flag_ac = visits[a_c].crossing_flags();
+    const uint16_t flag_ac = visits[a_c].crossing_flags();
     const uint16_t c_a = visits[a_c].mate; // flag_b: A -> C
     const uint16_t a_b = iter(a_c, dir_a);
     const uint16_t c_b = iter(c_a, dir_c);
     const uint16_t b_c = visits[c_b].mate;
-    const uint8_t flag_cb = visits[c_b].crossing_flags(); // flag_a: C -> B
-    const uint8_t flag_ab = visits[a_b].crossing_flags(); // flag_c: A -> B
+    const uint16_t flag_cb = visits[c_b].crossing_flags(); // flag_a: C -> B
+    const uint16_t flag_ab = visits[a_b].crossing_flags(); // flag_c: A -> B
     const uint16_t b_a = visits[a_b].mate;
 
     return Visit::GET_TYPE(flag_cb) == VisitType::under &&
@@ -245,21 +253,34 @@ private:
            are_adjacent(b_a, b_c) && a_c != a_b && a_c != b_c && a_b != b_c;
   }
 
-  uint8_t compute_moves(uint16_t a) const noexcept {
+  inline bool is_R4(uint16_t a, Direction dir, VisitType type) const noexcept {
+    if (type == VisitType::over) return true;
+
+    const uint16_t a_b = mate(a);
+    const uint16_t a_c = iter(a_b, dir);
+    return visits[a_c].type() == VisitType::under;
+  }
+
+  uint16_t compute_moves(uint16_t a) const noexcept {
     if (visits[a].type() == VisitType::under)
       return 0;
 
-    uint8_t res =
-        is_loop(a) << Visit::R1_NEG_SHIFT | is_bigon(a) << Visit::R2_NEG_SHIFT;
+    uint16_t res = is_loop(a) << Visit::R1_NEG_SHIFT | is_bigon(a) << Visit::R2_NEG_SHIFT;
     for (auto dir_a : {Direction::next, Direction::prev}) {
       for (auto dir_c : {Direction::next, Direction::prev}) {
-        res |= is_triangle(a, dir_a, dir_c) << (Visit::DIR_SHIFT(dir_a, dir_c));
+        res |= is_triangle(a, dir_a, dir_c) << (Visit::R3_ARG_SHIFT(dir_a, dir_c));
+      }
+    }
+
+    for (auto dir : {Direction::next, Direction::prev}) {
+      for (auto type : {VisitType::over, VisitType::under}) {
+        res |= is_R4(a, dir, type) << (Visit::R4_ARG_SHIFT(dir, type));
       }
     }
     return res;
   }
 
-  void bind(uint16_t a, uint16_t b, uint8_t crossing_flags) {
+  void bind(uint16_t a, uint16_t b, uint16_t crossing_flags) {
     visits[a] = Visit(b, crossing_flags);
     visits[b] = Visit(a, Visit::FLIP(crossing_flags));
   }
@@ -296,17 +317,17 @@ private:
     case ReidemeisterKind::R2_pos:
       return true;
     case ReidemeisterKind::R3:
-      return is_triangle(a, move.dir_over(), move.dir_under());
+      return visits[a].is_triangle(move.dir_over(), move.dir_under());
+    case ReidemeisterKind::R4_pos:
+      return visits[a].is_R4(move.dir(), move.type());
     default:
       return false;
     }
   }
 
   bool
-  is_valid_R2(uint16_t a, uint16_t b,
-              const ReidemeisterMove &move) const noexcept { // non_local R2+
-    std::cerr << "Not implemented: is_valid_R2 for " << a << " and " << b
-              << " with args " << move << std::endl;
+  is_valid_R2(uint16_t a, uint16_t b, const ReidemeisterMove &move) const noexcept { // non_local R2+
+    std::cerr << "Not implemented: is_valid_R2 for " << a << " and " << b << " with args " << move << std::endl;
     return get_comp(a).second > 0 && get_comp(b).second > 0 &&
            false; // TODO this is not enough
   }
@@ -337,8 +358,7 @@ private:
 
   void compute_all_moves() noexcept {
     for (uint16_t a = 0; a < 2 * n_crossings; a++) {
-      visits[a].flags =
-          (visits[a].flags & ~Visit::MOVES_MASK) | compute_moves(a);
+      visits[a].flags = (visits[a].flags & ~Visit::MOVES_MASK) | compute_moves(a);
     }
   }
 
@@ -353,15 +373,16 @@ public: // constructors
 
   DYNAMIC Link(const uint16_t n_crossings, uint16_t components_cnt, const uint16_t *n_conn_crossings, Visit *visits_)
       : n_crossings(n_crossings), dynamic_components_cnt(components_cnt),
-        dynamic_n_conn_crossings(reinterpret_cast<uint16_t *>(0)) { // TODO: fix this
+        dynamic_n_conn_crossings(
+            reinterpret_cast<uint16_t *>(0)) { // TODO: fix this
 
-    std::memcpy(dynamic_n_conn_crossings, n_conn_crossings, dynamic_components_cnt * sizeof(uint16_t));
+    std::memcpy(dynamic_n_conn_crossings, n_conn_crossings,dynamic_components_cnt * sizeof(uint16_t));
     std::memcpy(visits, visits_, 2 * n_crossings * sizeof(Visit));
     compute_all_moves();
     set_hash();
   }
 
-  Link<static_n_components> apply_move(uint16_t v, ReidemeisterMove move) const {
+  Link<static_n_components> apply_move(uint16_t v,  ReidemeisterMove move) const {
     if (n_crossings == 0) [[unlikely]] {
       if (move.kind != ReidemeisterKind::R1_pos || v != 0) {
         std::cerr << "Invalid move: only positive R1 with v=0 is allowed on "
@@ -381,13 +402,12 @@ public: // constructors
     const uint16_t a =
         (visits[2 * v].type() == VisitType::over) ^ under ? 2 * v : mate(2 * v);
 
-
-    #ifdef DEBUG
+#ifdef DEBUG
     if (!is_valid_move(a, move)) [[unlikely]] {
       std::cerr << "Invalid move: " << move << " at " << a << std::endl;
       throw std::runtime_error("Invalid move");
     }
-    #endif
+#endif
 
     if constexpr (dynamic) {
       return Link<static_n_components>(*this, a, move, nullptr);
@@ -396,10 +416,8 @@ public: // constructors
     }
   }
 
-  STATIC Link(const Link<static_n_components> &link, uint16_t a,
-              const ReidemeisterMove &move)
-      : n_crossings(link.new_n_crossings(move.kind)),
-        visits() {
+  STATIC Link(const Link<static_n_components> &link, uint16_t a, const ReidemeisterMove &move)
+      : n_crossings(link.new_n_crossings(move.kind)), visits() {
 
     std::memcpy(static_n_conn_crossings, link.static_n_conn_crossings,
                 static_n_components * sizeof(uint16_t));
@@ -420,16 +438,17 @@ public: // constructors
     case ReidemeisterKind::R3:
       R3(link, a, move.dir_over(), move.dir_under());
       break;
+    case ReidemeisterKind::R4_pos:
+      R4_pos(link, a, move.dir(), move.type());
+      break;
     }
     set_hash();
   }
 
-  DYNAMIC Link(const Link<static_n_components> &link, uint16_t a,
-               const ReidemeisterMove &move, uint16_t *storage)
+  DYNAMIC Link(const Link<static_n_components> &link, uint16_t a,const ReidemeisterMove &move, uint16_t *storage)
       : n_crossings(link.new_n_crossings(move.kind)),
         dynamic_components_cnt(link.dynamic_components_cnt),
-        dynamic_n_conn_crossings(storage),
-        visits() {
+        dynamic_n_conn_crossings(storage), visits() {
 
     std::memcpy(dynamic_n_conn_crossings, link.dynamic_n_conn_crossings,
                 dynamic_components_cnt * sizeof(uint16_t));
@@ -445,16 +464,26 @@ public: // constructors
       R2_neg(link, a);
       break;
     case ReidemeisterKind::R2_pos:
-      R2_pos(link, a, move.dir_over(), move.dir_under(), move.type());
+      R2_pos(link, a, move.type(), move.dir_over(), move.dir_under());
       break;
     case ReidemeisterKind::R3:
       R3(link, a, move.dir_over(), move.dir_under());
+      break;
+    case ReidemeisterKind::R4_pos:
+      R4_pos(link, a, move.dir(), move.type());
       break;
     }
     set_hash();
   }
 
-  void R1_neg(const Link<static_n_components> &link, const uint16_t a) noexcept {
+
+  // given that you know the flags of a-b and a-c, return the sign of a-c 
+  static Orientation third_sign(uint16_t flag_ab, uint16_t flag_ac) noexcept {
+
+  }
+
+  void R1_neg(const Link<static_n_components> &link,
+              const uint16_t a) noexcept {
 
     const uint16_t a0 = link.mate(link.prev(a)) == a ? link.prev(a) : a;
     const uint16_t a1 = link.next(a0);
@@ -497,7 +526,7 @@ public: // constructors
     compute_all_moves(); // TODO: replace with a more efficient implementation
 
 #ifdef DEBUG
-    verify_invariant<true>();
+    verify_invariant();
 #endif
   }
 
@@ -530,7 +559,7 @@ public: // constructors
     compute_all_moves(); // TODO: replace with a more efficient implementation
 
 #ifdef DEBUG
-    verify_invariant<true>();
+    verify_invariant();
 #endif
   }
 
@@ -566,8 +595,7 @@ public: // constructors
     const uint16_t max_ = std::max(a, b);
 
     auto poke = [min_, max_, &link](uint16_t i) {
-      return Visit(poking_index(min_, max_, link.visits[i].mate),
-                   link.visits[i].flags);
+      return Visit(poking_index(min_, max_, link.visits[i].mate), link.visits[i].flags);
     };
 
     uint16_t b1 = b, b2 = b + 1;
@@ -587,7 +615,7 @@ public: // constructors
     for (uint16_t i = max_ - 2; i < 2 * link.n_crossings; i++)
       visits[i + 4] = poke(i);
 
-    const uint8_t flag = Visit::FLAG(sign, VisitType::over);
+    const uint16_t flag = Visit::FLAG(sign, VisitType::over);
 
     bind(a, b1, flag);
     bind(a + 1, b2, Visit::MIRROR(flag));
@@ -595,7 +623,7 @@ public: // constructors
     compute_all_moves(); // TODO: replace with a more efficient implementation
 
 #ifdef DEBUG
-    verify_invariant<true>();
+    verify_invariant();
 #endif
   }
 
@@ -609,9 +637,7 @@ public: // constructors
     }
   }
 
-  void R2_pos(const Link<static_n_components> &link, uint16_t a0,
-              VisitType type, Direction dir_over,
-              Direction dir_under) noexcept { // local R2+
+  void R2_pos(const Link<static_n_components> &link, uint16_t a0,  VisitType type, Direction dir_over, Direction dir_under) noexcept { // local R2+
 
     if (type == VisitType::under) {
       a0 = mate(a0);
@@ -637,18 +663,16 @@ public: // constructors
     R2_pos(link, std::min(a1, a2), std::min(b1, b2), collinear, sign);
   }
 
-  void R3(const Link<static_n_components> &link, const uint16_t a_c,
-          Direction dir_a,
-          Direction dir_c) noexcept { // a_b, a_c and b_a are OVER
+  void R3(const Link<static_n_components> &link, const uint16_t a_c,  Direction dir_a, Direction dir_c) noexcept { // a_b, a_c and b_a are OVER
     std::memcpy(visits, link.visits, 2 * n_crossings * sizeof(Visit));
 
-    uint8_t flag_b = visits[a_c].crossing_flags();
+    uint16_t flag_b = visits[a_c].crossing_flags();
     uint16_t c_a = mate(a_c); // flag_b: A -> C
     uint16_t a_b = iter(a_c, dir_a);
     uint16_t c_b = iter(c_a, dir_c);
-    uint8_t flag_a = visits[c_b].crossing_flags(); // flag_a: C -> B
+    uint16_t flag_a = visits[c_b].crossing_flags(); // flag_a: C -> B
     uint16_t b_c = mate(c_b);
-    uint8_t flag_c = visits[a_b].crossing_flags(); // flag_c: A -> B
+    uint16_t flag_c = visits[a_b].crossing_flags(); // flag_c: A -> B
     uint16_t b_a = mate(a_b);
 
     bind(c_a, b_a, flag_a);
@@ -658,8 +682,62 @@ public: // constructors
     compute_all_moves(); // TODO: replace with a more efficient implementation
 
 #ifdef DEBUG
-    verify_invariant<true>();
+    verify_invariant();
 #endif
+  }
+
+  void R4_pos(const Link<static_n_components> &link, const uint16_t a, Direction dir, VisitType type) noexcept {
+    const uint16_t a_b = type == VisitType::over ? a : mate(a);
+    const uint16_t a_c = iter(a_b, dir);
+    const uint16_t b = mate(a_b);
+    const uint16_t c = mate(a_c);
+
+    const uint16_t min_ = std::min(b, c) + 1, max_ = std::max(b, c) + 1;
+
+    auto poke_index = [min_, max_](uint16_t i) {return poking_index(min_, max_, i);};
+
+    auto poke_visit = [min_, max_, poke_index, &link](uint16_t i) {
+      return Visit(poke_index(i), link.visits[i].flags);
+    };
+
+    const uint16_t new_b = poking_index(min_, max_, b);
+    const uint16_t new_c = poking_index(min_, max_, c);
+
+    inc_comps(min_, max_ - 2);
+
+    KNOT_PRAGMA_IVDEP
+
+    for (uint16_t i = 0; i < min_; i++)
+      visits[i] = poke_visit(i);
+
+    for (uint16_t i = min_; i < max_ - 2; i++)
+      visits[i + 2] = poke_visit(i);
+
+    for (uint16_t i = max_ - 2; i < 2 * link.n_crossings; i++)
+      visits[i + 4] = poke_visit(i);
+
+    uint16_t ba_flag = link.visits[b].crossing_flags();
+    uint16_t ca_flag = link.visits[c].crossing_flags();
+
+    const uint16_t b_up_shift = 0;
+    const uint16_t c_up_shift = 0;
+    uint16_t b_down_shift = 2 - b_up_shift;
+    uint16_t c_down_shift = 2 - c_up_shift;
+
+    uint16_t up_flag = Visit::FLAG(third_sign(Visit::FLIP(ba_flag), Visit::FLIP(ba_flag)),VisitType::over);
+    uint16_t down_flag = Visit::MIRROR(up_flag);
+
+    bind(new_b + b_up_shift, new_c + c_up_shift, up_flag);
+    bind(new_b + b_down_shift, new_c + c_down_shift, down_flag);
+
+    bind(poke_index(a_c), new_b + 1, Visit::FLIP(ba_flag));
+    bind(poke_index(a_b), new_c + 1, Visit::FLIP(ca_flag));
+
+#ifdef DEBUG
+    verify_invariant();
+#endif
+
+    //FIXME: finish dealing with the signs
   }
 
   void to_dowker(int16_t *out) const noexcept {
@@ -735,15 +813,13 @@ public: // constructors
 
   MoveRange moves() const noexcept { return MoveRange{*this}; }
 
-  template <bool write>
-  std::pair<bool, std::string> verify_invariant() const noexcept {
+std::pair<bool, std::string> verify_invariant() const noexcept {
     std::ostringstream res;
     bool violated = false;
     for (uint16_t a = 0; a < 2 * n_crossings; a++) {
       const uint16_t b = mate(a);
-      uint8_t flags_a = flags(a), flags_b = flags(b);
-      if (visits[a].type() == VisitType::under &&
-          visits[a].moves_flags() != 0) {
+      uint16_t flags_a = flags(a), flags_b = flags(b);
+      if (visits[a].type() == VisitType::under && visits[a].has_move()) {
         res << "Under visit " << a << " has moves flags " << int(flags_a)
             << " (mate " << int(flags_b) << ")\n";
         violated = true;
@@ -786,13 +862,11 @@ public: // constructors
       violated = true;
     }
 
-    if (violated) {
+    if (violated) [[unlikely]] {
+      std::cerr << res.str();
       throw std::runtime_error(res.str());
     }
 
-    if (write && violated) {
-      std::cerr << res.str();
-    }
     return {violated, res.str()};
   }
 
@@ -826,17 +900,15 @@ public: // constructors
 
 template <uint16_t static_n_components> class MoveIterator {
 
-  MoveIterator(const Link<static_n_components> &link, uint16_t a, uint16_t v,
-               uint8_t bit, uint8_t moves_flags)
+  MoveIterator(const Link<static_n_components> &link, uint16_t a, uint16_t v, uint16_t bit, uint16_t moves_flags)
       : link(link), a(a), v(v), bit(bit), moves_flags(moves_flags) {}
 
 public:
   const Link<static_n_components> &link; // which Link we’re iterating
   uint16_t a;                            // visit index [0 .. 2*n_crossings)
   uint16_t v;
-  uint8_t bit;
-  uint8_t moves_flags;
-
+  uint16_t bit;
+  uint16_t moves_flags;
 
   AvailableMove operator*() const noexcept {
     return AvailableMove(v, Visit::GET_DIRECT_MOVE(bit));
@@ -876,9 +948,8 @@ public:
     if (link.n_crossings == 0) [[unlikely]]
       return end(link);
 
-    MoveIterator it(link, 0, link.vertex_index(0), 0,
-                    link.visits[0].moves_flags());
-    if ((it.moves_flags & (uint8_t(1) << it.bit)) == 0) [[likely]]
+    MoveIterator it(link, 0, link.vertex_index(0), 0, link.visits[0].moves_flags());
+    if ((it.moves_flags & (uint16_t(1) << it.bit)) == 0) [[likely]]
       ++it;
     return it;
   }
