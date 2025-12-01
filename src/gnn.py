@@ -2,6 +2,8 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 import math
+from typing import Tuple, Optional
+from torch_geometric.data import Batch
 from torch_geometric.nn import global_mean_pool
 
 class BatchPositionalEncoding(nn.Module):
@@ -32,7 +34,18 @@ class BatchPositionalEncoding(nn.Module):
         pe (torch.Tensor): The learnable positional encoding buffer of shape 
             (max_len, d_model).
     """
-    def __init__(self, d_model, max_len=2000, n=10000):
+    def __init__(self, d_model: int, max_len: int = 2000, n: int = 10000) -> None:
+        """
+        Initialize the positional encoding module.
+        
+        Args:
+            d_model: Dimension of the model (embedding size). Note that since each
+                node appears twice, their final embedding will be of size 2 * d_model
+                as the over and under encodings are concatenated. d_model should be even.
+            max_len: Maximum length of Dowker sequence. Should be 2 * max crossings expected.
+                Defaults to 2000.
+            n: Base for the positional encoding frequency. Defaults to 10000.
+        """
         super().__init__()
 
         self.d_model = d_model
@@ -44,7 +57,8 @@ class BatchPositionalEncoding(nn.Module):
         pe[:, 1::2] = torch.cos(position * div_term)
         
         self.register_buffer('pe', pe)
-    def forward(self, dowker, ptr):
+    
+    def forward(self, dowker: torch.Tensor, ptr: torch.Tensor) -> torch.Tensor:
         """
         Encodes a batch of disjoint Dowker sequences into node embeddings.
 
@@ -115,7 +129,19 @@ class KnotAttention(nn.Module):
         heads (int, optional): Number of attention heads. Defaults to 2. The number
             of heads must divide the input_dim since d_v = input_dim / heads.
     """
-    def __init__(self, input_dim, d_k, heads=2):
+    def __init__(self, input_dim: int, d_k: int, heads: int = 2) -> None:
+        """
+        Initialize the multi-head attention module.
+        
+        Args:
+            input_dim: Dimension of input node features.
+            d_k: Dimension of the key/query vectors.
+            heads: Number of attention heads. Defaults to 2. The number of heads
+                must divide the input_dim since d_v = input_dim / heads.
+                
+        Raises:
+            ValueError: If input_dim is not divisible by heads.
+        """
         super().__init__()
 
         if input_dim % heads != 0:
@@ -132,21 +158,26 @@ class KnotAttention(nn.Module):
 
         self.reset_parameters()
 
-    def reset_parameters(self):
+    def reset_parameters(self) -> None:
+        """Initialize parameters using Xavier uniform initialization."""
         nn.init.xavier_uniform_(self.w_q)
         nn.init.xavier_uniform_(self.w_k)
         nn.init.xavier_uniform_(self.w_v)
 
-    def forward(self, x, adjacency_matrix):
+    def forward(self, x: torch.Tensor, adjacency_matrix: torch.Tensor) -> torch.Tensor:
         """
         Multi-head attention forward pass.
         
         Args:
-            x: (num_nodes, input_dim)
-            adjacency_matrix: (num_nodes, 4)
+            x: Input node features.
+                Shape: (num_nodes, input_dim)
+            adjacency_matrix: Indices of the 4 distinct neighbors for each node.
+                Shape: (num_nodes, 4)
+                Each row contains [over_out, over_in, under_out, under_in] neighbor indices.
 
         Returns:
-            Z: (num_nodes, Heads * d_v)
+            Output node features after multi-head attention.
+                Shape: (num_nodes, heads * d_v)
         """
         
         N = x.shape[0]
@@ -190,7 +221,24 @@ class KnotTransformerLayer(nn.Module):
             Defaults to 4 * input_dim.
     """
 
-    def __init__(self, input_dim, d_k, heads=2, d_ff=None):
+    def __init__(
+        self, 
+        input_dim: int, 
+        d_k: int, 
+        heads: int = 2, 
+        d_ff: Optional[int] = None
+    ) -> None:
+        """
+        Initialize the transformer layer.
+        
+        Args:
+            input_dim: Dimension of the input node features.
+                Must be divisible by `heads` to ensure dimension alignment.
+            d_k: Dimension of the query and key vectors per head.
+            heads: Number of attention heads. Defaults to 2.
+            d_ff: Hidden dimension of the Feed-Forward network.
+                If None, defaults to 4 * input_dim.
+        """
         super().__init__()
 
         self.d_ff = 4*input_dim if d_ff is None else d_ff
@@ -206,7 +254,11 @@ class KnotTransformerLayer(nn.Module):
         self.norm1 = nn.LayerNorm(input_dim)
         self.norm2 = nn.LayerNorm(input_dim)
 
-    def forward(self, x, adjacency_matrix):
+    def forward(
+        self, 
+        x: torch.Tensor, 
+        adjacency_matrix: torch.Tensor
+    ) -> torch.Tensor:
         """
         Forward pass of the Knot Transformer Layer.
 
@@ -217,14 +269,16 @@ class KnotTransformerLayer(nn.Module):
         4. Residual Connection + Layer Normalization
 
         Args:
-            x (torch.Tensor): Input node features.
-                Shape: `(num_nodes, input_dim)`
-            adjacency_matrix (torch.Tensor): Indices of the 4 distinct neighbors 
-                for each node (excluding self-loop).
-                Shape: `(num_nodes, 4)`
+            x: Input node features.
+                Shape: (num_nodes, input_dim)
+            adjacency_matrix: Indices of the 4 distinct neighbors for each node
+                (excluding self-loop).
+                Shape: (num_nodes, 4)
+                Each row contains [over_out, over_in, under_out, under_in] neighbor indices.
+                
         Returns:
-            torch.Tensor: Updated node features preserving input shape.
-                Shape: `(num_nodes, input_dim)`
+            Updated node features preserving input shape.
+                Shape: (num_nodes, input_dim)
         """
 
         attn_output = self.attention(x, adjacency_matrix)
@@ -261,7 +315,37 @@ class AlphaKnot(nn.Module):
         policy_dim (int, optional): Hidden dimension size for the Policy Head MLP.
             If None, defaults to model_dim * 2.
     """
-    def __init__(self, model_dim, d_k, transformer_layers=4, heads=2, moves = 14, d_ff=None, value_dim=None, policy_dim=None):
+    def __init__(
+        self,
+        model_dim: int,
+        d_k: int,
+        transformer_layers: int = 4,
+        heads: int = 2,
+        moves: int = 14,
+        d_ff: Optional[int] = None,
+        value_dim: Optional[int] = None,
+        policy_dim: Optional[int] = None
+    ) -> None:
+        """
+        Initialize the AlphaKnot model.
+        
+        Args:
+            model_dim: Dimension of the node initial embeddings (input features).
+                It must satisfy lcm(2, heads) | model_dim due to embedding size considerations.
+            d_k: Dimension of the key and query vectors in the Multi-Head Attention mechanism.
+            transformer_layers: Number of stacked KnotTransformerLayer blocks.
+                Defaults to 4.
+            heads: Number of attention heads. Defaults to 2.
+                The number of heads should divide the input_dim since d_v = input_dim // heads.
+            moves: Size of the action space per node (number of output classes).
+                Defaults to 14.
+            d_ff: Dimension of the feed-forward network within the transformer.
+                If None, defaults to 4 * model_dim.
+            value_dim: Hidden dimension size for the Value Head MLP.
+                If None, defaults to model_dim * 2.
+            policy_dim: Hidden dimension size for the Policy Head MLP.
+                If None, defaults to model_dim * 2.
+        """
         super().__init__()
         
         self.value_dim = value_dim if value_dim is not None else model_dim*2
@@ -286,25 +370,31 @@ class AlphaKnot(nn.Module):
             nn.Linear(self.policy_dim, moves)
         )
 
-    def forward(self, batch):
+    def forward(self, batch: Batch) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Forward pass for a batch of disjoint graphs.
 
         Args:
-            batch (torch_geometric.data.Batch): A PyG Batch object of KnotData instances.
-            It should contain:
-                - x (Tensor): Node features of shape (N_total, model_dim).
-                - neighbor_index (Tensor): Adjacency/Neighbor indices used by the transformer.
-                - mask (BoolTensor): Action mask of shape (N_total, moves). 
-                  True indicates an invalid move that should be masked out.
-                - batch (LongTensor): Batch vector of shape (N_total,) mapping each 
-                  node to its graph index.
+            batch: A PyG Batch object of KnotData instances. It should contain:
+                - dowker (torch.Tensor): Dowker sequence representation.
+                    Shape: (2 * N_total, 2)
+                - neighbor_index (torch.Tensor): Adjacency/Neighbor indices.
+                    Shape: (N_total, 4)
+                - mask (torch.Tensor): Action mask indicating invalid moves.
+                    Shape: (N_total, moves)
+                    True indicates an invalid move that should be masked out.
+                - batch (torch.Tensor): Batch vector mapping each node to its graph index.
+                    Shape: (N_total,)
+                - ptr (torch.Tensor): Graph pointer tensor.
+                    Shape: (batch_size + 1,)
 
         Returns:
-            Tuple[Tensor, Tensor]:
-                - logits (Tensor): Node-level action logits of shape (N_total, moves).
-                  Invalid moves are masked with -inf.
-                - values (Tensor): Graph-level value estimates of shape (Batch_Size,).
+            Tuple containing:
+                - logits: Node-level action logits.
+                    Shape: (N_total, moves)
+                    Invalid moves are masked with -inf.
+                - values: Graph-level value estimates.
+                    Shape: (batch_size,)
         """
 
         dowker = batch.dowker
