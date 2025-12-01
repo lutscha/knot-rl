@@ -63,12 +63,18 @@ GreedyResult greedy_minimize_crossings(Knot start, std::size_t max_expansions) {
       best_hash = cur_hash;
     };
 
+    if (best.n_crossings == 0) {
+        break;
+    }
+
     ++expansions;
 
     // 1) Direct moves from the iterator
     for (auto m : cur.moves()) {
       Knot child = cur.apply_move(m.v, m.move);
       const Hash h = child.hash_;
+    //   std::cout << "move: " << m.move << " on vertex " << m.v << std::endl;
+    //   child.print_state();
 
       auto [it, inserted] = parent_map.emplace(h, ParentInfo{cur_hash, m});
       if (!inserted)
@@ -86,6 +92,9 @@ GreedyResult greedy_minimize_crossings(Knot start, std::size_t max_expansions) {
             ReidemeisterMove mv = ReidemeisterMove::R2_pos(type, dir_over, dir_under);
 
             Knot child = cur.apply_move(v, mv);
+
+            // std::cout << "move: R2 pos" << mv << " on vertex " << v << std::endl;
+            // child.print_state();
 
             const Hash h = child.hash_;
 

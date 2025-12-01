@@ -218,19 +218,20 @@ def random_knot(n_strands, n_crossings) -> Link:
 
 
 def serialize_link(link: Link) -> str:
+    def encode_flags(v: Visit) -> int:
+        SIGN_SHIFT = 0
+        TYPE_SHIFT = 7
+        return (v.orientation.value << SIGN_SHIFT) | (v.type.value << TYPE_SHIFT)
+
     return json.dumps(
         {
             "n_components": link.n_components,
             "n_crossings": link.n_crossings,
             "n_conn_visits": link.n_conn_visits,
+            # visits is now a list of [mate, flags]
             "visits": [
-                {
-                    "i": i,
-                    "mate": v.index,
-                    "type": v.type.name,
-                    "orientation": v.orientation.name,
-                }
-                for i, v in enumerate(link.visits)
+                [v.index, encode_flags(v)]
+                for v in link.visits
             ],
         },
         indent=2,
