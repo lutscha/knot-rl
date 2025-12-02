@@ -81,7 +81,7 @@ void test() {
 
 Knot amirs_knot() {
   static constexpr uint16_t n_crossings = 4;
-  static uint16_t comp[1] = {n_crossings};
+  static uint16_t comp[1] = {2 *n_crossings};
   static Visit visits[2 * n_crossings] = {
       Visit(3, Orientation::neg, VisitType::over),
       Visit(6, Orientation::pos, VisitType::under),
@@ -96,7 +96,7 @@ Knot amirs_knot() {
 
 Knot culprit_unknot() {
   static constexpr uint16_t n_crossings = 10;
-  static uint16_t comp[1] = {n_crossings};
+  static uint16_t comp[1] = {2 *n_crossings};
   static Visit visits[2 * n_crossings] = {
       Visit(13, Orientation::neg, VisitType::under),
       Visit(4, Orientation::pos, VisitType::over),
@@ -123,7 +123,7 @@ Knot culprit_unknot() {
 
 Knot culprit_light() {
   static constexpr uint16_t n_crossings = 12;
-  static uint16_t comp[1] = {n_crossings};
+  static uint16_t comp[1] = {2 *  n_crossings};
   static Visit visits[2 * n_crossings] = {
       Visit(15, Orientation::neg, VisitType::under),
       Visit(6, Orientation::pos, VisitType::over),
@@ -154,7 +154,7 @@ Knot culprit_light() {
 };
 
 void culprit() {
-  Knot culprit_unknot_ = culprit_light();
+  Knot culprit_unknot_ = culprit_unknot();
   culprit_unknot_.print_state();
   culprit_unknot_.print_dowker();
 
@@ -163,13 +163,15 @@ void culprit() {
   culprit_undone.best.print_state();
   culprit_undone.best.print_dowker();
 
-  for (auto m : culprit_undone.path) {
-    std::cout << m.move << " on vertex " << m.v << std::endl;
+  for (size_t i = 0; i < culprit_undone.knots.size(); i++) {
+    culprit_undone.knots[i].print_dowker();
+    std::cout << culprit_undone.path[i].move << std::endl;
+    //culprit_undone.knots[i].print_state();
   }
 }
 
-int main() {
-  std::ifstream ifs("knot_data/large_knot.json");
+void deserialize_and_print() {
+  std::ifstream ifs("knot_data/another_knot.json");
   if (!ifs) {
     std::cerr << "Failed to open" << std::endl;
   } else {
@@ -179,5 +181,9 @@ int main() {
     knot.print_state();
     knot.print_dowker();
   }
-  return 0;
 }
+
+int main() { 
+   culprit();
+   return 0; 
+  }
