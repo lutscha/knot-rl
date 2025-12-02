@@ -1,12 +1,15 @@
 import torch
 import torch.nn as nn
-from typing import List, Tuple, Optional
+
+
+from torch.nn.functional import mse_loss
+from typing import List, Tuple, Optional, Dict
 from collections import deque
 import random
 from torch_geometric.data import Batch
 from torch_geometric.utils import scatter
-from .data import KnotData
-
+from data import KnotData
+from gnn import AlphaKnot
 
 class ReplayBuffer:
     """
@@ -28,40 +31,20 @@ class ReplayBuffer:
         self.buffer: deque = deque(maxlen=capacity)
     
     def add(self, knot_data: KnotData, visit_distribution: torch.Tensor, outcome: float):
-        """
-        Add an experience tuple to the replay buffer.
-        
-        Args:
-            knot_data (KnotData): The knot diagram state.
-            visit_distribution (torch.Tensor): Policy distribution from MCTS.
-                Shape: (num_nodes, moves) - flattened probability distribution
-                over all (node, move) pairs for this graph.
-            outcome (float): The final value/reward from MCTS (typically in [-1, 1]).
-        """
+        # detach tensors to ensure they don't keep graph history alive in RAM
+        visit_distribution = visit_distribution.detach().cpu()
         self.buffer.append((knot_data, visit_distribution, outcome))
     
     def sample(self, batch_size: int) -> List[Tuple[KnotData, torch.Tensor, float]]:
-        """
-        Sample a batch of experience tuples uniformly at random.
-        
-        Args:
-            batch_size (int): Number of samples to return.
-            
-        Returns:
-            List of (KnotData, VisitDistribution, Outcome) tuples.
-        """
         if len(self.buffer) < batch_size:
             return list(self.buffer)
         return random.sample(self.buffer, batch_size)
     
     def __len__(self) -> int:
-        """Return the current size of the replay buffer."""
         return len(self.buffer)
     
     def clear(self):
-        """Clear all entries from the replay buffer."""
         self.buffer.clear()
-
 
 def compute_loss(
     model: nn.Module,
@@ -90,37 +73,135 @@ def compute_loss(
             - policy_loss: Cross-entropy loss between predicted and target policies
             - value_loss: MSE loss between predicted and target values
     """
+    
     logits, values = model(batch)
-    
-    batch_index = batch.batch
+    batch_index = batch.batch  # Shape: (N_total_nodes,)
     moves = logits.shape[1]
-    
-    logits_flat = logits.view(-1)
-    visit_dist_flat = visit_distributions.view(-1)
-    segment_index = batch_index.repeat_interleave(moves)  # (N_total * moves,)
-    
-    # compute log_softmax per graph using numerically stable log-sum-exp trick
-    # log_softmax(x) = x - max(x) - log(sum(exp(x - max(x))))
-    # this avoids the numerical issues
-    
+
+    # logsumexp
+    logits_flat = logits.reshape(-1)
+    visit_dist_flat = visit_distributions.reshape(-1)
+    segment_index = batch_index.repeat_interleave(moves)
+
     max_per_graph = scatter(logits_flat, segment_index, dim=0, reduce='max')
     max_per_action = max_per_graph[segment_index]
-    
     exp_shifted = torch.exp(logits_flat - max_per_action)
     sum_exp_per_graph = scatter(exp_shifted, segment_index, dim=0, reduce='sum')
-    log_sum_exp_per_action = torch.log(sum_exp_per_graph[segment_index])
+    log_sum_exp_per_action = torch.log(sum_exp_per_graph[segment_index]) # epsilon for safety here?
+    
     log_probs_flat = logits_flat - max_per_action - log_sum_exp_per_action
-    
-    # compute cross-entropy element-wise: -target * log(predicted)
+
     ce_per_action = -visit_dist_flat * log_probs_flat
-    
-    # sum CE per graph
     ce_per_graph = scatter(ce_per_action, segment_index, dim=0, reduce='sum')
-    
     policy_loss = ce_per_graph.mean()
-    value_loss = nn.functional.mse_loss(values, outcomes)
     
-    # total loss
+    value_loss = mse_loss(values.view(-1), outcomes.view(-1))
+    
     total_loss = policy_weight * policy_loss + value_weight * value_loss
     
     return total_loss, policy_loss, value_loss
+
+def train_step(
+    model: nn.Module,
+    optimizer: torch.optim.Optimizer,
+    replay_buffer: ReplayBuffer,
+    batch_size: int,
+    device: torch.device,
+    policy_weight: float = 1.0,
+    value_weight: float = 1.0,
+    gradient_clipping: bool = True
+) -> Tuple[float, float, float]:
+    """
+    Perform a single training step. Model should already be on device and in training.
+    """
+    if len(replay_buffer) < batch_size:
+        return 0.0, 0.0, 0.0
+    
+    experiences = replay_buffer.sample(batch_size)
+    
+    knot_data_list, visit_distributions_list, outcomes_list = zip(*experiences)
+    
+    batch = Batch.from_data_list(list(knot_data_list))
+    batch = batch.to(device)
+    
+    visit_distributions = torch.cat(visit_distributions_list, dim=0).to(device)
+    z_outcomes = torch.tensor(outcomes_list, dtype=torch.float32, device=device)
+    
+    optimizer.zero_grad()
+    
+    total_loss, policy_loss, value_loss = compute_loss(
+        model, batch, visit_distributions, z_outcomes, policy_weight, value_weight
+    )
+
+    total_loss.backward()
+    
+    if gradient_clipping:
+        nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        
+    optimizer.step()
+    
+    return total_loss.item(), policy_loss.item(), value_loss.item()
+
+def train_epoch(
+    model: nn.Module,
+    optimizer: torch.optim.Optimizer,
+    replay_buffer: ReplayBuffer,
+    batch_size: int,
+    steps_per_epoch: int,
+    device: Optional[torch.device] = None,
+    policy_weight: float = 1.0,
+    value_weight: float = 1.0
+) -> Dict[str, float]:
+    """
+    Perform steps_per_epoch training steps.
+    """
+    
+    if device is None:
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    
+    
+    model = model.to(device)
+    model.train()
+    
+    total_losses = []
+    policy_losses = []
+    value_losses = []
+    
+    for _ in range(steps_per_epoch):
+        t_loss, p_loss, v_loss = train_step(
+            model, optimizer, replay_buffer, batch_size, device,
+            policy_weight, value_weight
+        )
+
+        if t_loss != 0.0:
+            total_losses.append(t_loss)
+            policy_losses.append(p_loss)
+            value_losses.append(v_loss)
+    
+    if not total_losses:
+        return {'total_loss': 0.0, 'policy_loss': 0.0, 'value_loss': 0.0}
+    
+    return {
+        'total_loss': sum(total_losses) / len(total_losses),
+        'policy_loss': sum(policy_losses) / len(policy_losses),
+        'value_loss': sum(value_losses) / len(value_losses)
+    }
+
+def run_test():
+    print("Initializing components...")
+    
+    # Setup Device
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(f"Using device: {device}")
+
+    buffer = ReplayBuffer(capacity=1000)
+    model = AlphaKnot(model_dim=64, d_k=16, transformer_layers=4, heads=2, moves=4)
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-5, weight_decay=1e-4)
+    
+    model = model.to(device)
+    model.train()
+
+    # train loop
+
+if __name__ == "__main__":
+    run_test()
