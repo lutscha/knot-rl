@@ -217,20 +217,27 @@ def random_knot(n_strands, n_crossings) -> Link:
     return braid_to_link(braid)
 
 
-def serialize_link(link: Link) -> str:
-    def encode_flags(v: Visit) -> int:
-        SIGN_SHIFT = 0
-        TYPE_SHIFT = 7
-        return (v.orientation.value << SIGN_SHIFT) | (v.type.value << TYPE_SHIFT)
+SIGN_SHIFT = 0
+R3_SHIFT = 3
+N_R3_MOVES = 4
+R4_SHIFT = R3_SHIFT + N_R3_MOVES      # 7
+N_R4_MOVES = 4
+TYPE_SHIFT = R4_SHIFT + N_R4_MOVES    # 11
 
+def visit_flags(v) -> int:
+    sign_bit = 0 if v.orientation == Orientation.POS else 1
+    type_bit = 0 if v.type == VisitType.OVER else 1
+    return (sign_bit << SIGN_SHIFT) | (type_bit << TYPE_SHIFT)
+
+def serialize_link(link) -> str:
     return json.dumps(
         {
             "n_components": link.n_components,
             "n_crossings": link.n_crossings,
             "n_conn_visits": link.n_conn_visits,
-            # visits is now a list of [mate, flags]
+            # each entry: [mate, flags]
             "visits": [
-                [v.index, encode_flags(v)]
+                [v.index, visit_flags(v)]
                 for v in link.visits
             ],
         },
@@ -238,7 +245,7 @@ def serialize_link(link: Link) -> str:
     )
 
 if __name__ == "__main__":
-    link = random_knot(6, 20)
+    link = random_knot(10, 100)
 
-    with open("knot_data/large_knot.json", "w") as f:
+    with open("knot_data/huge_knot.json", "w") as f:
         f.write(serialize_link(link))
