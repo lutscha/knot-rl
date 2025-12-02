@@ -21,7 +21,7 @@
 #define KNOT_PRAGMA_IVDEP
 #endif
 
-static constexpr uint16_t MAX_CROSSINGS = 100;
+static constexpr uint16_t MAX_CROSSINGS = 300;
 static constexpr uint16_t MAX_DYNAMIC_COMPONENTS = 100;
 
 struct Vertex {
@@ -37,6 +37,17 @@ struct Vertex {
       this->over[i] = over[i];
     }
   }
+};
+
+struct FacialLengths {
+  uint16_t len[2][2];
+
+  FacialLengths() : len{{0, 0}, {0, 0}} {}
+};
+
+struct Dart {
+  uint16_t a;
+  Direction dir;
 };
 
 template <uint16_t static_n_components> class MoveIterator;
@@ -389,6 +400,7 @@ public: // constructors
         std::cerr << "Invalid move: only positive R1 with v=0 is allowed on "
                      "unknots, received "
                   << move << " on " << v << std::endl;
+        exit(1);
         return *this;
       }
       if constexpr (dynamic) {
@@ -400,12 +412,11 @@ public: // constructors
 
     const uint16_t a = visits[2 * v].type() == VisitType::over ? 2 * v : mate(2 * v);
 
-#ifdef DEBUG
+
     if (!is_valid_move(a, move)) [[unlikely]] {
       std::cerr << "Invalid move: " << move << " at " << a << std::endl;
       throw std::runtime_error("Invalid move");
     }
-#endif
 
     if constexpr (dynamic) {
       return Link<static_n_components>(*this, a, move, nullptr);
@@ -689,15 +700,20 @@ public: // constructors
     uint16_t ab_flag = link.visits[a_b].crossing_flags();
     uint16_t ac_flag = link.visits[a_c].crossing_flags();
 
-    bool collinear = !(Visit::GET_TYPE(ab_flag) == Visit::GET_TYPE(ac_flag)) ^
+    bool collinear = (Visit::GET_TYPE(ab_flag) == Visit::GET_TYPE(ac_flag)) ==
                      (Visit::GET_SIGN(ab_flag) == Visit::GET_SIGN(ac_flag));
 
-    Orientation next_sign = Orientation::pos; // FIXME
+              
+    bool same_sign = (Visit::GET_TYPE(ac_flag) == VisitType::over) == 
+                     (dir == Direction::next);
 
-    uint16_t next_flag = Visit::FLAG(next_sign, VisitType::over);
+    Orientation next_sign = select_orientation(Visit::GET_SIGN(ac_flag),
+                                               same_sign); // FIXME
 
-    bind(new_b, new_c + 2 * (!collinear), Visit::MIRROR(next_flag));
-    bind(new_b + 2, new_c + 2 * collinear, next_flag);  
+    uint16_t b_flag = Visit::FLAG(next_sign, VisitType::over);
+
+    bind(new_b, new_c + 2 * (!collinear), b_flag);
+    bind(new_b + 2, new_c + 2 * collinear, Visit::MIRROR(b_flag));  
 
     bind(poke_index(a_c), new_b + 1, ab_flag);
     bind(poke_index(a_b), new_c + 1, ac_flag);
@@ -846,14 +862,59 @@ std::pair<bool, std::string> verify_invariant() const {
     return {violated, res.str()};
   }
 
-  void print_dowker() const noexcept {
+  Dart next_dart(const Dart &dart, const Orientation sign) const noexcept {
+    const uint16_t b_mate = iter(dart.a, dart.dir);
+    const uint16_t b = mate(b_mate);
+    const uint16_t flag_ba = visits[b].crossing_flags();
+
+    const bool same_dir = (Visit::GET_TYPE(flag_ba) == VisitType::over) ==
+                           (Visit::GET_SIGN(flag_ba) == sign);
+    const Direction dir_b = select_direction(dart.dir, same_dir);
+    return Dart(b, dir_b);
+   
+  }
+
+  void compute_facial_length(FacialLengths *out) const noexcept {
+    Dart visited[MAX_CROSSINGS] {};
+    for (uint16_t a = 0; a < 2 * n_crossings; a++) {
+      const uint16_t v_a = vertex_index(a);
+      const VisitType type_a = Visit::GET_TYPE(flags(a));
+      for (Direction dir : {Direction::next, Direction::prev}) {
+        if (out[v_a].len[static_cast<size_t>(type_a)][static_cast<size_t>(dir)] != 0) {
+          continue;
+        }
+        Dart dart = Dart(a, dir);
+        uint16_t length = 0;
+        do {
+          if (length > n_crossings) {
+            std::cerr << "Cycle detected in facial length computation" << std::endl;
+            std::exit(1);
+          }
+
+          
+          visited[length] = dart;
+          length++;
+          dart = next_dart(dart, Orientation::pos);
+        } while (dart.a != a);
+
+        for (uint16_t i = 0; i < length; i++) {
+          const Dart &dart = visited[i];
+          const uint16_t v = vertex_index(dart.a);
+          const VisitType type = Visit::GET_TYPE(flags(dart.a));
+          out[v].len[static_cast<size_t>(type)][static_cast<size_t>(dart.dir)] = length;
+        }
+      }
+   }
+  }
+
+  void print_dowker(std::string delimiter = ", ") const noexcept {
     static int16_t dowker[MAX_CROSSINGS];
     this->to_dowker(dowker);
     std::cout << "DT: [";
     for (uint16_t i = 0; i < this->n_crossings; i++) {
       std::cout << dowker[i];
       if (i < this->n_crossings - 1) {
-        std::cout << ", ";
+        std::cout << delimiter;
       }
     }
     std::cout << "]\n";

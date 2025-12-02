@@ -80,7 +80,6 @@ GreedyResult greedy_minimize_crossings(Knot start, std::size_t max_expansions) {
       Knot child = cur.apply_move(m.v, m.move);
       const Hash h = child.hash_;
 
-
       auto [it, inserted] = parent_map.emplace(h, ParentInfo{cur_hash, m});
       if (!inserted)
         continue; // already visited
@@ -120,4 +119,19 @@ GreedyResult greedy_minimize_crossings(Knot start, std::size_t max_expansions) {
 
   // `cur` should now be equal (up to hash) to `best`.
   return GreedyResult{std::move(best), std::move(knots), std::move(path)};
+}
+
+void print_path(const GreedyResult &result) {
+  // print start state
+  std::cout << "Start state:\n";
+  result.knots[0].print_state();
+
+  for (size_t i = 0; i < result.path.size(); i++) {
+    std::cout << "Move " << i << ": " << result.path[i].move << "\n";
+    std::cout << "After move:\n";
+    result.knots[i + 1].print_state();
+  }
+
+  std::cout << "Best (from result.best):\n";
+  result.best.print_dowker();
 }

@@ -7,9 +7,26 @@
 
 enum class Orientation { pos = 0, neg = 1 };
 
+inline Orientation operator!(Orientation orient) noexcept {
+    return static_cast<Orientation>(1 - static_cast<int>(orient));
+}
+
+inline Orientation select_orientation(Orientation sign, bool same) noexcept {
+    return same ? sign : !sign;
+}
+
+
 enum class VisitType { over = 0, under = 1 };
 
 enum class Direction { next = 0, prev = 1 };
+
+inline Direction operator!(Direction dir) noexcept {
+  return static_cast<Direction>(1 - static_cast<int>(dir));
+}
+
+inline Direction select_direction(Direction dir, bool same) noexcept {
+  return same ? dir : !dir;
+}
 
 enum class ReidemeisterKind {
   R1_neg = -1,
