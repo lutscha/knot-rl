@@ -321,10 +321,11 @@ class AlphaKnot(nn.Module):
         d_k: int,
         transformer_layers: int = 4,
         heads: int = 2,
-        moves: int = 14,
+        moves: int = 10,
         d_ff: Optional[int] = None,
         value_dim: Optional[int] = None,
-        policy_dim: Optional[int] = None
+        policy_dim: Optional[int] = None,
+        max_len: int = 8400
     ) -> None:
         """
         Initialize the AlphaKnot model.

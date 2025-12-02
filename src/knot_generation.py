@@ -3,6 +3,8 @@ from enum import Enum
 import random
 import json
 
+from typing import List
+
 random.seed(42)
 
 def inv_perm(perm: list[int]) -> list[int]:
@@ -136,9 +138,6 @@ def braid_to_link(braid: Braid) -> Link:
     assert visits_seen == 2 * len(braid.repr)
 
     return Link(n_components=cur_comp, n_crossings=len(braid.repr), n_conn_visits=n_conn_visits, visits=visits_result)
-
-
-from typing import List
 
 def complete_perm_to_long_cycle(beta: List[int]) -> List[int]:
     """
