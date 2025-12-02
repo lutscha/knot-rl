@@ -9,6 +9,7 @@ using json = nlohmann::json;
 
 template <uint16_t static_n_components>
 Link<static_n_components> deserialize_link(const std::string &json_str) {
+  using json = nlohmann::json;
   json j = json::parse(json_str);
 
   // 1. Components
@@ -21,7 +22,7 @@ Link<static_n_components> deserialize_link(const std::string &json_str) {
   // 2. Crossings
   uint16_t n_crossings = j.at("n_crossings").get<uint16_t>();
 
-  // 3. Component sizes (visits -> crossings)
+  // 3. Component sizes: visits → crossings
   auto n_conn_visits = j.at("n_conn_visits").get<std::vector<uint16_t>>();
   if (n_conn_visits.size() != static_n_components) {
     throw std::runtime_error("n_conn_visits length != static_n_components");
@@ -41,7 +42,7 @@ Link<static_n_components> deserialize_link(const std::string &json_str) {
     throw std::runtime_error("sum(n_conn_crossings) != n_crossings");
   }
 
-  // 4. Visits: list of [mate, flags]
+  // 4. Visits: [mate, flags]
   const auto &visits_json = j.at("visits");
   if (visits_json.size() != 2 * n_crossings) {
     throw std::runtime_error("visits size mismatch");
@@ -60,7 +61,7 @@ Link<static_n_components> deserialize_link(const std::string &json_str) {
     visits[i] = Visit(mate, flags);
   }
 
-  // 5. Construct static Link
+  // 5. Construct static link (will recompute move bits & hash)
   return Link<static_n_components>(n_crossings, n_conn_crossings,
                                    visits.data());
 }

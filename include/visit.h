@@ -134,7 +134,7 @@ inline std::ostream &operator<<(std::ostream &os, const ReidemeisterMove &arg) {
     os << "R2+ over=" << arg.dir_over() << " under=" << arg.dir_under();
     break;
   case ReidemeisterKind::R3:
-    os << "R3 " << arg.dir_over() << " " << arg.dir_under();
+    os << "R3  " << arg.dir_over() << " " << arg.dir_under();
     break;
   case ReidemeisterKind::R4_pos:
     os << "R4+ " << arg.dir() << " " << arg.type();
@@ -243,8 +243,13 @@ struct Visit {
   inline uint16_t moves_flags() const noexcept { return flags & MOVES_MASK; }
 
   static inline VisitType GET_TYPE(uint16_t flags) noexcept {
-    return VisitType((flags >> TYPE_SHIFT) & 1);
+      return VisitType((flags >> TYPE_SHIFT) & 1);
   }
+
+  static inline Orientation GET_SIGN(uint16_t flags) noexcept {
+      return Orientation((flags >> SIGN_SHIFT) & 1);
+  }
+
   inline VisitType type() const noexcept { return GET_TYPE(crossing_flags()); }
 
   inline Orientation sign() const noexcept {

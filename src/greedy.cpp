@@ -20,7 +20,10 @@ struct KnotCmp {
 
 struct GreedyResult {
   Knot best;
-  std::vector<AvailableMove> path; // moves from start to best
+  std::vector<Knot>
+      knots; // states along the path: knots[0] = start, knots.back() = best
+  std::vector<AvailableMove>
+      path; // moves from start to best (path[i] takes knots[i] -> knots[i+1])
 };
 
 GreedyResult greedy_minimize_crossings(Knot start, std::size_t max_expansions) {
@@ -61,70 +64,60 @@ GreedyResult greedy_minimize_crossings(Knot start, std::size_t max_expansions) {
     if (cur.n_crossings < best.n_crossings) {
       best = cur;
       best_hash = cur_hash;
-    };
+    }
 
     if (best.n_crossings == 0) {
-        break;
+      break;
     }
 
     ++expansions;
 
-    // 1) Direct moves from the iterator
+    //std::cout << "CURRENT: ";
+   // cur.print_state();
+
     for (auto m : cur.moves()) {
+      //std::cout << "MOVE: " << m.move << " on vertex " << m.v << std::endl;
       Knot child = cur.apply_move(m.v, m.move);
       const Hash h = child.hash_;
-    //   std::cout << "move: " << m.move << " on vertex " << m.v << std::endl;
-    //   child.print_state();
+
 
       auto [it, inserted] = parent_map.emplace(h, ParentInfo{cur_hash, m});
       if (!inserted)
         continue; // already visited
+
       pq.push(std::move(child));
-    }
-
-    // 2) Local R2+ moves (8 per vertex)
-    const uint16_t n = cur.n_crossings;
-    for (uint16_t v = 0; v < n; ++v) {
-      for (VisitType type : {VisitType::over, VisitType::under}) {
-        for (Direction dir_over : {Direction::next, Direction::prev}) {
-          for (Direction dir_under : {Direction::next, Direction::prev}) {
-
-            ReidemeisterMove mv = ReidemeisterMove::R2_pos(type, dir_over, dir_under);
-
-            Knot child = cur.apply_move(v, mv);
-
-            // std::cout << "move: R2 pos" << mv << " on vertex " << v << std::endl;
-            // child.print_state();
-
-            const Hash h = child.hash_;
-
-            auto [it, inserted] = parent_map.emplace(
-                h, ParentInfo{cur_hash, AvailableMove(v, mv)});
-            if (!inserted)
-              continue; // already visited
-            pq.push(std::move(child));
-          }
-        }
-      }
     }
   }
 
-  // Reconstruct path from start_hash to best_hash.
+  // Reconstruct path of moves from start_hash to best_hash.
   std::vector<AvailableMove> path;
   path.reserve(best.n_crossings + 8); // rough guess; better than nothing
 
-
+  {
     Hash h = best_hash;
-  while (h != start_hash) {
-    auto it = parent_map.find(h);
-    if (it == parent_map.end())
-      break; // should not happen; abort reconstruction
+    while (h != start_hash) {
+      auto it = parent_map.find(h);
+      if (it == parent_map.end())
+        break; // should not happen; abort reconstruction
 
-    const ParentInfo &info = it->second;
-    path.push_back(info.move);
-    h = info.parent;
+      const ParentInfo &info = it->second;
+      path.push_back(info.move);
+      h = info.parent;
+    }
+    std::reverse(path.begin(), path.end());
   }
-  std::reverse(path.begin(), path.end());
 
-  return GreedyResult{std::move(best), std::move(path)};
+  // Reconstruct the sequence of knots by applying the moves to `start`.
+  std::vector<Knot> knots;
+  knots.reserve(path.size() + 1);
+  Knot cur = start;
+  knots.push_back(cur); // knots[0] = start
+
+  for (const auto &m : path) {
+    cur = cur.apply_move(m.v, m.move);
+    knots.push_back(cur);
+  }
+
+  // `cur` should now be equal (up to hash) to `best`.
+  return GreedyResult{std::move(best), std::move(knots), std::move(path)};
 }
