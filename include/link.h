@@ -760,10 +760,10 @@ public: // constructors
     for (uint16_t a = 0; a < 2 * n_crossings; a += 2) {
       Vertex &v = out[vertex_index(a)];
 
-      v.over[0] = vertex_index(next(a));
-      v.over[1] = vertex_index(prev(a));
-      v.under[0] = vertex_index(next(mate(a)));
-      v.under[1] = vertex_index(prev(mate(a)));
+      v.over[static_cast<uint16_t>(Direction::next)] = vertex_index(next(a));
+      v.over[static_cast<uint16_t>(Direction::prev)] = vertex_index(prev(a));
+      v.under[static_cast<uint16_t>(Direction::next)] = vertex_index(next(mate(a)));
+      v.under[static_cast<uint16_t>(Direction::prev)] = vertex_index(prev(mate(a)));
       v.flags = vertex_flags(a);
     }
   }

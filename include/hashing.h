@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
-#include <iostream>
 #include <sys/types.h>
 
 constexpr uint64_t seed = 42;
