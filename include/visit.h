@@ -8,13 +8,12 @@
 enum class Orientation { pos = 0, neg = 1 };
 
 inline Orientation operator!(Orientation orient) noexcept {
-    return static_cast<Orientation>(1 - static_cast<int>(orient));
+  return static_cast<Orientation>(1 - static_cast<int>(orient));
 }
 
 inline Orientation select_orientation(Orientation sign, bool same) noexcept {
-    return same ? sign : !sign;
+  return same ? sign : !sign;
 }
-
 
 enum class VisitType { over = 0, under = 1 };
 
@@ -76,7 +75,8 @@ struct ReidemeisterMove {
     return ReidemeisterMove(ReidemeisterKind::R1_neg);
   }
 
-  static inline ReidemeisterMove R1_pos(Orientation sign, VisitType type) noexcept {
+  static inline ReidemeisterMove R1_pos(Orientation sign,
+                                        VisitType type) noexcept {
     return ReidemeisterMove(ReidemeisterKind::R1_pos,
                             (uint8_t)sign << SIGN_SHIFT | (uint8_t)type
                                                               << TYPE_SHIFT);
@@ -108,9 +108,11 @@ struct ReidemeisterMove {
                                 (uint8_t)dir_under << DIR_UNDER_SHIFT);
   }
 
-  static inline ReidemeisterMove R4_pos(Direction dir, VisitType type) noexcept {
+  static inline ReidemeisterMove R4_pos(Direction dir,
+                                        VisitType type) noexcept {
     return ReidemeisterMove(ReidemeisterKind::R4_pos,
-      (uint8_t)dir << DIR_SHIFT | (uint8_t)type  << TYPE_SHIFT);
+                            (uint8_t)dir << DIR_SHIFT | (uint8_t)type
+                                                            << TYPE_SHIFT);
   }
 };
 
@@ -171,20 +173,23 @@ struct Visit {
   static constexpr uint8_t N_R4_MOVES = 4;
 
   static constexpr uint8_t SIGN_SHIFT = 0;
-  static constexpr uint8_t R1_NEG_SHIFT = 1;
-  static constexpr uint8_t R2_NEG_SHIFT = 2;
-  static constexpr uint8_t R3_SHIFT = 3;
+  static constexpr uint8_t TYPE_SHIFT = 1;
+
+  static constexpr uint8_t R1_NEG_SHIFT = 2;
+  static constexpr uint8_t R2_NEG_SHIFT = 3;
+  static constexpr uint8_t R3_SHIFT = 4;
   static constexpr uint8_t R4_SHIFT = R3_SHIFT + N_R3_MOVES;
-  static constexpr uint8_t TYPE_SHIFT = R4_SHIFT + N_R4_MOVES;
 
   static constexpr uint8_t MOVES_FIRST_BIT = R1_NEG_SHIFT;
   static constexpr uint8_t MOVES_LAST_BIT = R4_SHIFT + N_R4_MOVES;
 
-  static constexpr uint8_t R3_ARG_SHIFT(const Direction dir_a, const Direction dir_c) noexcept {
+  static constexpr uint8_t R3_ARG_SHIFT(const Direction dir_a,
+                                        const Direction dir_c) noexcept {
     return R3_SHIFT + uint8_t(dir_a) + 2 * uint8_t(dir_c);
   }
 
-  static constexpr uint8_t R4_ARG_SHIFT(const Direction dir, const VisitType type) noexcept {
+  static constexpr uint8_t R4_ARG_SHIFT(const Direction dir,
+                                        const VisitType type) noexcept {
     return R4_SHIFT + uint8_t(dir) + 2 * uint8_t(type);
   }
 
@@ -220,7 +225,6 @@ struct Visit {
     Direction dir = Direction(r4_arg_shift & 1);
     VisitType type = VisitType((r4_arg_shift >> 1) & 1);
     return ReidemeisterMove::R4_pos(dir, type);
-
   }
 
   uint16_t mate;
@@ -230,7 +234,9 @@ struct Visit {
 
   static inline uint16_t FLIP(uint16_t flags) noexcept { return flags ^ TYPE; }
 
-  static inline uint16_t MIRROR(uint16_t flags) noexcept { return flags ^ SIGN; }
+  static inline uint16_t MIRROR(uint16_t flags) noexcept {
+    return flags ^ SIGN;
+  }
 
   static inline uint16_t FLAG(Orientation sign, VisitType type) noexcept {
     return (uint16_t)sign << SIGN_SHIFT | (uint16_t)type << TYPE_SHIFT;
@@ -260,11 +266,11 @@ struct Visit {
   inline uint16_t moves_flags() const noexcept { return flags & MOVES_MASK; }
 
   static inline VisitType GET_TYPE(uint16_t flags) noexcept {
-      return VisitType((flags >> TYPE_SHIFT) & 1);
+    return VisitType((flags >> TYPE_SHIFT) & 1);
   }
 
   static inline Orientation GET_SIGN(uint16_t flags) noexcept {
-      return Orientation((flags >> SIGN_SHIFT) & 1);
+    return Orientation((flags >> SIGN_SHIFT) & 1);
   }
 
   inline VisitType type() const noexcept { return GET_TYPE(crossing_flags()); }
