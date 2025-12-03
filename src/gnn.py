@@ -400,7 +400,6 @@ class AlphaKnot(nn.Module):
 
         dowker = batch.dowker
         neighbor_index = batch.neighbor_index
-        mask = batch.mask
         batch_index = batch.batch
         batch_ptr = batch.ptr
 
@@ -408,13 +407,12 @@ class AlphaKnot(nn.Module):
 
         for layer in self.transformer_pass:
             x = layer(x, neighbor_index)
-        
+
         graph_embedding = global_mean_pool(x, batch_index)
 
         values = self.value_head(graph_embedding).squeeze(-1)
 
         logits = self.policy_head(x)
-        
-        logits = logits.masked_fill(mask, float('-inf'))
 
         return logits, values
+

@@ -142,51 +142,6 @@ def train_step(
     
     return total_loss.item(), policy_loss.item(), value_loss.item()
 
-def train_epoch(
-    model: nn.Module,
-    optimizer: torch.optim.Optimizer,
-    replay_buffer: ReplayBuffer,
-    batch_size: int,
-    steps_per_epoch: int,
-    device: Optional[torch.device] = None,
-    policy_weight: float = 1.0,
-    value_weight: float = 1.0
-) -> Dict[str, float]:
-    """
-    Perform steps_per_epoch training steps.
-    """
-    
-    if device is None:
-        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    
-    
-    model = model.to(device)
-    model.train()
-    
-    total_losses = []
-    policy_losses = []
-    value_losses = []
-    
-    for _ in range(steps_per_epoch):
-        t_loss, p_loss, v_loss = train_step(
-            model, optimizer, replay_buffer, batch_size, device,
-            policy_weight, value_weight
-        )
-
-        if t_loss != 0.0:
-            total_losses.append(t_loss)
-            policy_losses.append(p_loss)
-            value_losses.append(v_loss)
-    
-    if not total_losses:
-        return {'total_loss': 0.0, 'policy_loss': 0.0, 'value_loss': 0.0}
-    
-    return {
-        'total_loss': sum(total_losses) / len(total_losses),
-        'policy_loss': sum(policy_losses) / len(policy_losses),
-        'value_loss': sum(value_losses) / len(value_losses)
-    }
-
 def run_test():
     print("Initializing components...")
     
