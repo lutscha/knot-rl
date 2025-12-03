@@ -14,24 +14,27 @@ struct Node;
 
 struct Child {
   ReidemeisterMove move;
-  Node *node = nullptr;
+  Node* parent;
+  Node* node = nullptr;
   bool is_expanded = false;
-  double logit = std::numeric_limits<double>::min();
+  double p = std::numeric_limits<double>::min();
 
+  Child(Node *parent, ReidemeisterMove move, double p) : move(move), parent(parent), p(p) {};
 
   uint32_t n_visits() const noexcept;
 
   // Q-Value: The average value of this node (defined after Node)
   double q_value() const;
 
-  double puct(double logit_exp_sum, double parent_sqrt_visits) const {
-    return q_value() + c * logit_exp_sum * parent_sqrt_visits / (1.0 + n_visits());
+  double puct(double parent_sqrt_visits) const {
+    return q_value() + c * p * parent_sqrt_visits / (1.0 + n_visits());
   }
+
 };
 
 struct Node {
   Knot knot;
-  std::unordered_set<Child> children;
+  std::unordered_set<Child> children; //children sorted by puct
 
   const std::unordered_set<uint64_t> &visited_hashes;
 
@@ -39,34 +42,46 @@ struct Node {
   bool is_expanded = false;
   double value = 0.0;
 
+  double logit_exp_sum = 0.0;
+  double parent_sqrt_visits = 0.0;
+
   Node(Knot knot, const std::unordered_set<uint64_t> &visited_hashes)
       : knot(knot), visited_hashes(visited_hashes) {}
 
   void expand() {
     is_expanded = true;
-    for (auto m : knot.moves()) {
-      Knot child_knot = knot.apply_move(m.v, m.move);
-
-      if (visited_hashes.find(child_knot.hash_) != visited_hashes.end()) {
-        continue;
-      }
-
-      Node child_node = Node(child_knot, visited_hashes);
-      children.insert(Child{m.move, &child_node});
+    for (auto m : knot.moves()){
+      double p = 0.0; //FIXME
+      children.insert(Child(this, m.move, p));
     }
+  }
+
+  Child* select_best_child() noexcept{
+    double best_puct = std::numeric_limits<double>::min();
+    Child* best_child = nullptr;
+    for (auto& child : children) {
+      double puct = child.puct(parent_sqrt_visits);
+      if (puct > best_puct) {
+        best_puct = puct;
+        best_child = const_cast<Child*>(&child);
+      }
+    }
+    best_child->node->expand();
+    return best_child;
   }
 };
 
 uint32_t Child::n_visits() const noexcept {
-  if (!is_expanded) {
+  if (!is_expanded)
     return 0;
-  }
   return node->n_visits;
 }
 
 // Define Child::q_value() now that Node is complete
 double Child::q_value() const {
-  return (node->n_visits > 0) ? (node->value / node->n_visits) : 0.0;
+  if (!is_expanded || node->n_visits == 0)
+    return 0.0;
+  return node->value / node->n_visits;
 }
 
 
