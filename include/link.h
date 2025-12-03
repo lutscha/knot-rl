@@ -21,8 +21,7 @@
 #define KNOT_PRAGMA_IVDEP
 #endif
 
-static constexpr uint16_t MAX_CROSSINGS = 300;
-static constexpr uint16_t MAX_DYNAMIC_COMPONENTS = 100;
+static constexpr uint16_t MAX_CROSSINGS = 1200;
 
 struct Vertex {
   uint16_t under[2];
@@ -410,7 +409,7 @@ public: // constructors
       }
     }
 
-    const uint16_t a = visits[2 * v].type() == VisitType::over ? 2 * v : mate(2 * v);
+    const uint16_t a = over_visit_index(v);
 
 
     if (!is_valid_move(a, move)) [[unlikely]] {
@@ -735,6 +734,16 @@ public: // constructors
 
   inline uint16_t vertex_index(uint16_t a) const noexcept {
     return a % 2 == 0 ? a / 2 : mate(a) / 2;
+  }
+
+  inline uint16_t over_visit_index(uint16_t v) const noexcept {
+    const uint16_t a = 2 * v;
+    return Visit::GET_TYPE(flags(a)) == VisitType::over ? a : mate(a);
+  }
+
+  inline uint16_t move_mask(uint16_t v) const noexcept {
+    const uint16_t a = over_visit_index(v);
+    return visits[a].moves_flags();
   }
 
   inline uint16_t vertex_flags(uint16_t a) const noexcept {

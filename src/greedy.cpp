@@ -1,5 +1,6 @@
 #include "../include/knot.h"
 #include <chrono>
+#include <iostream>
 #include <queue>
 #include <unordered_map>
 #include <vector>
@@ -26,7 +27,8 @@ struct GreedyResult {
       path; // moves from start to best (path[i] takes knots[i] -> knots[i+1])
 };
 
-GreedyResult greedy_minimize_crossings(Knot start, std::size_t max_expansions) {
+GreedyResult greedy_minimize_crossings(Knot start, std::size_t max_expansions,
+                                       std::size_t log_frequency = 50) {
   using PQ = std::priority_queue<Knot, std::vector<Knot>, KnotCmp>;
   using Hash = uint64_t;
 
@@ -35,9 +37,15 @@ GreedyResult greedy_minimize_crossings(Knot start, std::size_t max_expansions) {
     AvailableMove move; // move that produced this state from parent
   };
 
+  // Heuristic: each expanded node may generate several distinct children.
+  // Adjust 8 if you find your branching factor is smaller/larger.
+  std::size_t capacity_hint = max_expansions * 10 * MAX_CROSSINGS;
+  if (capacity_hint < max_expansions + 1)
+    capacity_hint = max_expansions + 1;
+
   // parent_map presence == “visited”
   std::unordered_map<Hash, ParentInfo> parent_map;
-  parent_map.reserve(max_expansions);
+  parent_map.reserve(capacity_hint);
   parent_map.max_load_factor(0.7f);
 
   const Hash start_hash = start.hash_;
@@ -46,9 +54,11 @@ GreedyResult greedy_minimize_crossings(Knot start, std::size_t max_expansions) {
       start_hash,
       ParentInfo{start_hash, AvailableMove(0, ReidemeisterMove::R1_neg())});
 
-  // Pre-reserve underlying storage for the heap
+  // Pre-reserve underlying storage for the heap.
+  // IMPORTANT: we now reserve for *all* potential enqueued nodes,
+  // not just max_expansions, to avoid repeated reallocations.
   std::vector<Knot> heap_storage;
-  heap_storage.reserve(max_expansions + 1);
+  heap_storage.reserve(capacity_hint + 1);
   PQ pq{KnotCmp{}, std::move(heap_storage)};
   pq.push(start);
 
@@ -57,7 +67,13 @@ GreedyResult greedy_minimize_crossings(Knot start, std::size_t max_expansions) {
   std::size_t expansions = 0;
 
   while (!pq.empty() && expansions < max_expansions) {
+
+
     Knot cur = pq.top();
+
+    if (log_frequency > 0 && ((expansions + 1) % log_frequency == 0)) {
+      std::cout << "EXPANSIONS: " << (expansions + 1) << " " << cur.n_crossings << " " << best.n_crossings << '\n';
+    }
     pq.pop();
     const Hash cur_hash = cur.hash_;
 
@@ -72,11 +88,7 @@ GreedyResult greedy_minimize_crossings(Knot start, std::size_t max_expansions) {
 
     ++expansions;
 
-    //std::cout << "CURRENT: ";
-   // cur.print_state();
-
     for (auto m : cur.moves()) {
-      //std::cout << "MOVE: " << m.move << " on vertex " << m.v << std::endl;
       Knot child = cur.apply_move(m.v, m.move);
       const Hash h = child.hash_;
 
@@ -117,7 +129,6 @@ GreedyResult greedy_minimize_crossings(Knot start, std::size_t max_expansions) {
     knots.push_back(cur);
   }
 
-  // `cur` should now be equal (up to hash) to `best`.
   return GreedyResult{std::move(best), std::move(knots), std::move(path)};
 }
 

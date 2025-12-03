@@ -1,93 +1,97 @@
 {
   "n_components": 1,
-  "n_crossings": 7,
+  "n_crossings": 11,
   "n_conn_visits": [
-    14
+    22
   ],
   "visits": [
-    {
-      "i": 0,
-      "mate": 3,
-      "type": "UNDER",
-      "orientation": "POS"
-    },
-    {
-      "i": 1,
-      "mate": 4,
-      "type": "OVER",
-      "orientation": "POS"
-    },
-    {
-      "i": 2,
-      "mate": 13,
-      "type": "OVER",
-      "orientation": "NEG"
-    },
-    {
-      "i": 3,
-      "mate": 0,
-      "type": "OVER",
-      "orientation": "POS"
-    },
-    {
-      "i": 4,
-      "mate": 1,
-      "type": "UNDER",
-      "orientation": "POS"
-    },
-    {
-      "i": 5,
-      "mate": 12,
-      "type": "UNDER",
-      "orientation": "POS"
-    },
-    {
-      "i": 6,
-      "mate": 9,
-      "type": "UNDER",
-      "orientation": "POS"
-    },
-    {
-      "i": 7,
-      "mate": 10,
-      "type": "OVER",
-      "orientation": "POS"
-    },
-    {
-      "i": 8,
-      "mate": 11,
-      "type": "UNDER",
-      "orientation": "POS"
-    },
-    {
-      "i": 9,
-      "mate": 6,
-      "type": "OVER",
-      "orientation": "POS"
-    },
-    {
-      "i": 10,
-      "mate": 7,
-      "type": "UNDER",
-      "orientation": "POS"
-    },
-    {
-      "i": 11,
-      "mate": 8,
-      "type": "OVER",
-      "orientation": "POS"
-    },
-    {
-      "i": 12,
-      "mate": 5,
-      "type": "OVER",
-      "orientation": "POS"
-    },
-    {
-      "i": 13,
-      "mate": 2,
-      "type": "UNDER",
-      "orientation": "NEG"
-    }
+    [
+      7,
+      1
+    ],
+    [
+      8,
+      0
+    ],
+    [
+      17,
+      2048
+    ],
+    [
+      18,
+      0
+    ],
+    [
+      19,
+      2048
+    ],
+    [
+      20,
+      2049
+    ],
+    [
+      21,
+      2048
+    ],
+    [
+      0,
+      2049
+    ],
+    [
+      1,
+      2048
+    ],
+    [
+      16,
+      2048
+    ],
+    [
+      13,
+      2048
+    ],
+    [
+      14,
+      0
+    ],
+    [
+      15,
+      2048
+    ],
+    [
+      10,
+      0
+    ],
+    [
+      11,
+      2048
+    ],
+    [
+      12,
+      0
+    ],
+    [
+      9,
+      0
+    ],
+    [
+      2,
+      0
+    ],
+    [
+      3,
+      2048
+    ],
+    [
+      4,
+      0
+    ],
+    [
+      5,
+      1
+    ],
+    [
+      6,
+      0
+    ]
   ]
 }

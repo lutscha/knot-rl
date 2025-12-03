@@ -244,7 +244,7 @@ def serialize_link(link) -> str:
     )
 
 if __name__ == "__main__":
-    link = random_knot(10, 100)
+    link = random_knot(2, 100)
 
-    with open("knot_data/huge_knot.json", "w") as f:
+    with open("knot_data/dumb_knot.json", "w") as f:
         f.write(serialize_link(link))

@@ -7,6 +7,8 @@
 
 #include "../include/deserializer.h"
 #include "../include/knot.h"
+#include "../include/basic_knots.h"
+#include "../src/unknot_generation.cpp"
 
 using Clock = std::chrono::steady_clock;
 
@@ -186,22 +188,11 @@ Link<static_n_components> deserialize(std::string filename) {
 
 
 int main() {
-  Knot knot = culprit_unknot();
-  knot.print_dowker(" ");
-  // Compute and print cycle_lengths for knot
-  FacialLengths cycle_lengths[MAX_CROSSINGS];
-  knot.compute_facial_length(cycle_lengths);
+  Knot knot = deserialize<1>("knot_data/dumb_knot.json");
+  knot.print_state();
+  knot.print_dowker(", ");
 
-  std::cout << "Cycle lengths:\n";
-  for (uint16_t v = 0; v < knot.n_crossings; ++v) {
-    std::cout << "v=" << v << std::endl;
-     for (size_t type = 0; type < 2; ++type) {
-      for (size_t dir = 0; dir < 2; ++dir) {
-        std::cout << cycle_lengths[v].len[type][dir] << " ";
-      }
-    }
-    std::cout << std::endl;
-  }
-
+  GreedyResult result = greedy_minimize_crossings(knot, 5000, 5);
+  result.best.print_dowker(", ");
   return 0;
 }
