@@ -49,6 +49,8 @@ struct Dart {
   Direction dir;
 
   Dart(uint16_t a, Direction dir) : a(a), dir(dir) {}
+
+  Dart() : a(0), dir(Direction::next) {}
 };
 
 template <uint16_t static_n_components> class MoveIterator;
