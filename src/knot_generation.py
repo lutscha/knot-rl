@@ -2,6 +2,8 @@ from dataclasses import dataclass
 from enum import Enum
 import random
 import json
+import argparse
+import re
 
 from typing import List
 
@@ -217,11 +219,7 @@ def random_knot(n_strands, n_crossings) -> Link:
 
 
 SIGN_SHIFT = 0
-R3_SHIFT = 3
-N_R3_MOVES = 4
-R4_SHIFT = R3_SHIFT + N_R3_MOVES      # 7
-N_R4_MOVES = 4
-TYPE_SHIFT = R4_SHIFT + N_R4_MOVES    # 11
+TYPE_SHIFT = 1
 
 def visit_flags(v) -> int:
     sign_bit = 0 if v.orientation == Orientation.POS else 1
@@ -229,12 +227,12 @@ def visit_flags(v) -> int:
     return (sign_bit << SIGN_SHIFT) | (type_bit << TYPE_SHIFT)
 
 def serialize_link(link) -> str:
-    return json.dumps(
+    # 1. Generate the fully expanded JSON string first
+    json_str = json.dumps(
         {
             "n_components": link.n_components,
             "n_crossings": link.n_crossings,
             "n_conn_visits": link.n_conn_visits,
-            # each entry: [mate, flags]
             "visits": [
                 [v.index, visit_flags(v)]
                 for v in link.visits
@@ -242,9 +240,30 @@ def serialize_link(link) -> str:
         },
         indent=2,
     )
+    
+    # Logic: Find '[' followed by whitespace/newlines, a number, comma, 
+    # whitespace/newlines, a number, whitespace/newlines, and ']'
+    # Replace with: '[number, number]'
+    return re.sub(
+        r'\[\s+(\d+),\s+(\d+)\s+\]', 
+        r'[\1, \2]', 
+        json_str
+    )
 
 if __name__ == "__main__":
-    link = random_knot(2, 100)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--path", default='')
+    parser.add_argument("--knots", default=10, type=int)
+    parser.add_argument("--max_num_strands", default=20, type=int)
+    parser.add_argument("--max_num_crossings", default=200, type=int)
 
-    with open("knot_data/dumb_knot.json", "w") as f:
-        f.write(serialize_link(link))
+    args = parser.parse_args()
+    path, knots, max_num_strands, max_num_crossings = args.path, args.knots, args.max_num_strands, args.max_num_crossings
+
+    for _ in range(knots):
+        num_strands = random.binomialvariate(max_num_strands, 0.5)
+        num_crossings = random.randint(20, max_num_crossings)
+        link = random_knot(num_strands, 100)
+
+        with open(path+f"knot{_}.json", "w") as f:
+            f.write(serialize_link(link))
