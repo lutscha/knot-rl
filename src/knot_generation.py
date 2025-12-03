@@ -219,11 +219,7 @@ def random_knot(n_strands, n_crossings) -> Link:
 
 
 SIGN_SHIFT = 0
-R3_SHIFT = 3
-N_R3_MOVES = 4
-R4_SHIFT = R3_SHIFT + N_R3_MOVES      # 7
-N_R4_MOVES = 4
-TYPE_SHIFT = R4_SHIFT + N_R4_MOVES    # 11
+TYPE_SHIFT = 1
 
 def visit_flags(v) -> int:
     sign_bit = 0 if v.orientation == Orientation.POS else 1
