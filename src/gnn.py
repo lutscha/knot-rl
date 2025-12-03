@@ -34,7 +34,7 @@ def mean_pool_index_add(x: torch.Tensor, batch_sizes: torch.Tensor) -> torch.Ten
 class KnotAttention(nn.Module):
     """
     Multi-head attention mechanism for knot diagrams. This module has a separate
-    key and value projection for each neighbor position in the adjacency matrix.
+    key and value projection for each neighbor position in the neighbor index.
     In particular, the key and value embeddigns of over-out, over-in, under-out,
     and under-in neighbors are all distinct.
 
@@ -79,14 +79,14 @@ class KnotAttention(nn.Module):
         nn.init.xavier_uniform_(self.w_k)
         nn.init.xavier_uniform_(self.w_v)
 
-    def forward(self, x: torch.Tensor, adjacency_matrix: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, neighbor_index: torch.Tensor) -> torch.Tensor:
         """
-        Multi-head attention forward pass.
+        Multi-headed attention forward pass.
         
         Args:
             x: Input node features.
                 Shape: (num_nodes, input_dim)
-            adjacency_matrix: Indices of the 4 distinct neighbors for each node.
+            neighbor_index: Indices of the 4 distinct neighbors for each node.
                 Shape: (num_nodes, 4)
                 Each row contains [over_out, over_in, under_out, under_in] neighbor indices.
 
@@ -98,7 +98,7 @@ class KnotAttention(nn.Module):
         N = x.shape[0]
 
         # (num_nodes, 4, input_dim)
-        real_neighbors = x[adjacency_matrix]
+        real_neighbors = x[neighbor_index]
 
         # (num_nodes, 1, input_dim)
         self_node = x.unsqueeze(1)
@@ -111,6 +111,86 @@ class KnotAttention(nn.Module):
         V = torch.einsum('nrd,hrdv->hnrv', x_neighbors, self.w_v)
 
         A = torch.einsum('hnk,hnrk->hnr', Q, K)/math.sqrt(self.d_k)
+        A = F.softmax(A, dim=1)
+
+        Z = torch.einsum('hnr,hnrv->hnv', A, V)
+
+        Z = Z.permute(1, 0, 2).reshape(N, -1)
+
+        return Z
+
+class KnotAttentionInvariant(nn.Module):
+    """
+    Invariant multi-head attention mechanism for knot diagrams. This module has 
+    a separate key and value projection for only the over/under neighbor positions
+    in the adjacency matrix. This makes it invariant to changes in diagram orientation.
+
+    Args:
+        input_dim (int): Dimension of input node features.
+        d_k (int): Dimension of the key/query vectors.
+        heads (int, optional): Number of attention heads. Defaults to 2. The number
+            of heads must divide the input_dim since d_v = input_dim / heads.
+    """
+    def __init__(self, input_dim: int, d_k: int, heads: int = 2) -> None:
+        super().__init__()
+
+        if input_dim % heads != 0:
+            raise ValueError("Input dimension must be divisible by number of heads.")
+        
+        self.input_dim = input_dim
+        self.d_k = d_k
+        self.d_v = input_dim // heads
+        self.heads = heads
+
+        self.w_q = nn.Parameter(torch.empty(heads, input_dim, d_k))
+        self.w_k = nn.Parameter(torch.empty(heads, 3, input_dim, d_k))
+        self.w_v = nn.Parameter(torch.empty(heads, 3, input_dim, self.d_v))
+
+        # Mapping: Self(0)->0, Over(1,2)->1, Under(3,4)->2
+        self.register_buffer(
+            'neighbor_map', 
+            torch.tensor([0, 1, 1, 2, 2], dtype=torch.long)
+        )
+
+        self.reset_parameters()
+
+    def reset_parameters(self) -> None:
+        nn.init.xavier_uniform_(self.w_q)
+        nn.init.xavier_uniform_(self.w_k)
+        nn.init.xavier_uniform_(self.w_v)
+
+    def forward(self, x: torch.Tensor, neighbor_index: torch.Tensor) -> torch.Tensor:
+        """
+        Invariant multi-headed attention forward pass.
+        
+        Args:
+            x: Input node features.
+                Shape: (num_nodes, input_dim)
+            neighbor_index: Indices of the 4 distinct neighbors for each node.
+                Shape: (num_nodes, 4)
+                Each row contains [over_out, over_in, under_out, under_in] neighbor indices.
+
+        Returns:
+            Output node features after multi-head attention.
+                Shape: (num_nodes, heads * d_v)
+        """
+        
+        N = x.shape[0]
+
+        real_neighbors = x[neighbor_index]
+        self_node = x.unsqueeze(1)
+        x_neighbors = torch.cat([self_node, real_neighbors], dim=1)
+
+        # w_k shape: (heads, 3, D, k) -> (heads, 5, D, k)
+        w_k_expanded = self.w_k[:, self.neighbor_map]
+        w_v_expanded = self.w_v[:, self.neighbor_map]
+
+        Q = torch.einsum('nd,hdk->hnk', x, self.w_q)
+        
+        K = torch.einsum('nrd,hrdk->hnrk', x_neighbors, w_k_expanded)
+        V = torch.einsum('nrd,hrdv->hnrv', x_neighbors, w_v_expanded)
+
+        A = torch.einsum('hnk,hnrk->hnr', Q, K) / math.sqrt(self.d_k)
         A = F.softmax(A, dim=1)
 
         Z = torch.einsum('hnr,hnrv->hnv', A, V)
@@ -141,7 +221,8 @@ class KnotTransformerLayer(nn.Module):
         input_dim: int, 
         d_k: int, 
         heads: int = 2, 
-        d_ff: Optional[int] = None
+        d_ff: Optional[int] = None,
+        attention: str = 'base'
     ) -> None:
         """
         Initialize the transformer layer.
@@ -153,12 +234,20 @@ class KnotTransformerLayer(nn.Module):
             heads: Number of attention heads. Defaults to 2.
             d_ff: Hidden dimension of the Feed-Forward network.
                 If None, defaults to 4 * input_dim.
+            attention: Type of attention mechanism. Options are 'base' and 'invariant'.
+                Defaults to 'base'.
         """
         super().__init__()
 
         self.d_ff = 4*input_dim if d_ff is None else d_ff
 
-        self.attention = KnotAttention(input_dim, d_k, heads=heads)
+
+        if attention == 'base':
+            self.attention = KnotAttention(input_dim, d_k, heads=heads)
+        elif attention == 'invariant':
+            self.attention = KnotAttentionInvariant(input_dim=input_dim, d_k=d_k, heads=heads)
+        else:
+            raise ValueError(f"Incorrect type of knot attention mechanism: {attention}.")
 
         self.ffn = nn.Sequential(
             nn.Linear(input_dim, self.d_ff),
@@ -172,7 +261,7 @@ class KnotTransformerLayer(nn.Module):
     def forward(
         self, 
         x: torch.Tensor, 
-        adjacency_matrix: torch.Tensor
+        neighbor_index: torch.Tensor
     ) -> torch.Tensor:
         """
         Forward pass of the Knot Transformer Layer.
@@ -186,7 +275,7 @@ class KnotTransformerLayer(nn.Module):
         Args:
             x: Input node features.
                 Shape: (num_nodes, input_dim)
-            adjacency_matrix: Indices of the 4 distinct neighbors for each node
+            neighbor_index: Indices of the 4 distinct neighbors for each node
                 (excluding self-loop).
                 Shape: (num_nodes, 4)
                 Each row contains [over_out, over_in, under_out, under_in] neighbor indices.
@@ -196,7 +285,7 @@ class KnotTransformerLayer(nn.Module):
                 Shape: (num_nodes, input_dim)
         """
 
-        attn_output = self.attention(x, adjacency_matrix)
+        attn_output = self.attention(x, neighbor_index)
         x = self.norm1(x + attn_output)
 
         ffn_output = self.ffn(x)
@@ -221,6 +310,8 @@ class AlphaKnot(nn.Module):
             Defaults to 4.
         heads (int, optional): Number of attention heads. Defaults to 2.
             The number of heads should divide the input_dim since d_v = input_dim // heads.
+        attention: Type of attention mechanism. Options are 'base' and 'invariant'.
+            Defaults to 'base'.
         moves (int, optional): Size of the action space per node (number of output classes).
             Defaults to 14.
         d_ff (int, optional): Dimension of the feed-forward network within the transformer.
@@ -234,8 +325,9 @@ class AlphaKnot(nn.Module):
         self,
         model_dim: int,
         d_k: int,
-        transformer_layers: int = 4,
         heads: int = 2,
+        attention: str = 'base',
+        transformer_layers: int = 4,
         moves: int = 10,
         d_ff: Optional[int] = None,
         value_dim: Optional[int] = None,
@@ -248,10 +340,11 @@ class AlphaKnot(nn.Module):
             model_dim: Dimension of the node initial embeddings (input features).
                 It must satisfy heads | model_dim due to embedding size considerations.
             d_k: Dimension of the key and query vectors in the Multi-Head Attention mechanism.
-            transformer_layers: Number of stacked KnotTransformerLayer blocks.
-                Defaults to 4.
             heads: Number of attention heads. Defaults to 2.
                 The number of heads should divide the input_dim since d_v = input_dim // heads.
+            
+            transformer_layers: Number of stacked KnotTransformerLayer blocks.
+                Defaults to 4.
             moves: Size of the action space per node (number of output classes).
                 Defaults to 14.
             d_ff: Dimension of the feed-forward network within the transformer.
@@ -269,7 +362,7 @@ class AlphaKnot(nn.Module):
         self.linear = nn.Linear(6, model_dim)
 
         self.transformer_pass = nn.ModuleList([
-            KnotTransformerLayer(input_dim=model_dim, d_k=d_k, heads=heads, d_ff=d_ff)
+            KnotTransformerLayer(input_dim=model_dim, d_k=d_k, heads=heads, d_ff=d_ff, attention=attention)
             for _ in range(transformer_layers)
         ])
 
@@ -285,7 +378,6 @@ class AlphaKnot(nn.Module):
             nn.Linear(self.policy_dim, moves)
         )
 
-    # TODO: update so it concats x and neighbor_index
     def forward(self, x, neighbor_index, batch_sizes) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Forward pass for a batch of disjoint graphs.
@@ -308,6 +400,7 @@ class AlphaKnot(nn.Module):
         """
 
         x = self.linear(x)
+        neighbor_index += torch.repeat_interleave(batch_sizes, batch_sizes).unsqueeze(-1)
 
         for layer in self.transformer_pass:
             x = layer(x, neighbor_index)
