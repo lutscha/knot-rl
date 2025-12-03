@@ -47,6 +47,8 @@ struct FacialLengths {
 struct Dart {
   uint16_t a;
   Direction dir;
+
+  Dart(uint16_t a, Direction dir) : a(a), dir(dir) {}
 };
 
 template <uint16_t static_n_components> class MoveIterator;

@@ -6,26 +6,27 @@
 #include <unordered_set>
 #include <vector>
 
-// ==================================================================================
-// Boilerplate API calls to the engine which need to be optimized later. These
-// are phantom classes that should interact with link and hash basically.
-// ==================================================================================
+double c = 0.1;
 
-struct Action {
-  int id;
-  // internal: uint16_t v, ReidemeisterMove move;
-  bool operator==(const Action &other) const { return id == other.id; }
-};
+
 
 struct Node;
 
 struct Child {
   ReidemeisterMove move;
   Node *node = nullptr;
+  bool is_expanded = false;
   double logit = std::numeric_limits<double>::min();
+
+
+  uint32_t n_visits() const noexcept;
 
   // Q-Value: The average value of this node (defined after Node)
   double q_value() const;
+
+  double puct(double logit_exp_sum, double parent_sqrt_visits) const {
+    return q_value() + c * logit_exp_sum * parent_sqrt_visits / (1.0 + n_visits());
+  }
 };
 
 struct Node {
@@ -56,10 +57,19 @@ struct Node {
   }
 };
 
+uint32_t Child::n_visits() const noexcept {
+  if (!is_expanded) {
+    return 0;
+  }
+  return node->n_visits;
+}
+
 // Define Child::q_value() now that Node is complete
 double Child::q_value() const {
   return (node->n_visits > 0) ? (node->value / node->n_visits) : 0.0;
 }
+
+
 
 // represents a state of a link
 class GameState {
