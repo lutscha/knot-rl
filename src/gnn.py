@@ -3,118 +3,33 @@ from torch import nn
 import torch.nn.functional as F
 import math
 from typing import Tuple, Optional
-from torch_geometric.data import Batch
-from torch_geometric.nn import global_mean_pool
 
-class BatchPositionalEncoding(nn.Module):
+def mean_pool_index_add(x: torch.Tensor, batch_sizes: torch.Tensor) -> torch.Tensor:
     """
-    Implements positional encoding for nodes in a graph diagram representation.
-
-    It treats the Dowker sequence positions as temporal positions and encodes 
-    them using sine and cosine functions. It takes a batch of Dowker sequences
-    and the batch_ptr vector. The encoding follows the standard formula:
-
-    $$
-    P(k, 2i) = \\sin\\left(\\frac{k}{n^{2i/d_{model}}}\\right)
-    $$
-    $$
-    P(k, 2i+1) = \\cos\\left(\\frac{k}{n^{2i/d_{model}}}\\right)
-    $$
+    Efficiently averages embeddings based on variable-length batch segments using index_add_.
 
     Args:
-        d_model (int): Dimension of the model (embedding size). Note that since each
-        node appears twice, their final embedding will be of size 2 * d_model as the
-        over and under encodings are concantenated. d_model should be even.
-        max_len (int, optional): Maximum length of Dowker sequence. Should be 
-            2 * max crossings expected. Defaults to 500.
-        n (int, optional): Base for the positional encoding frequency. 
-            Defaults to 10000.
+        x (torch.Tensor): The input tensor of stacked embeddings with shape 
+            (N_total, d), where N_total is the sum of all elements in batch_sizes.
+        batch_sizes (torch.Tensor): A 1D tensor containing the size of each 
+            batch segment (N1, N2, ..., Nb). Shape is (b,).
 
-    Attributes:
-        pe (torch.Tensor): The learnable positional encoding buffer of shape 
-            (max_len, d_model).
+    Returns:
+        torch.Tensor: The pooled embeddings with shape (b, d), where row i 
+            is the mean of the corresponding segment in x.
     """
-    def __init__(self, d_model: int, max_len: int = 2000, n: int = 10000) -> None:
-        """
-        Initialize the positional encoding module.
-        
-        Args:
-            d_model: Dimension of the model (embedding size). Note that since each
-                node appears twice, their final embedding will be of size 2 * d_model
-                as the over and under encodings are concatenated. d_model should be even.
-            max_len: Maximum length of Dowker sequence. Should be 2 * max crossings expected.
-                Defaults to 2000.
-            n: Base for the positional encoding frequency. Defaults to 10000.
-        """
-        super().__init__()
+    indices = torch.repeat_interleave(
+        torch.arange(len(batch_sizes), device=batch_sizes.device), 
+        batch_sizes
+    )
 
-        self.d_model = d_model
-        pe = torch.zeros(max_len, d_model)
-        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
-        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(n) / d_model))
-        
-        pe[:, 0::2] = torch.sin(position * div_term)
-        pe[:, 1::2] = torch.cos(position * div_term)
-        
-        self.register_buffer('pe', pe)
+    b, d = len(batch_sizes), x.shape[1]
+    summed = torch.zeros(b, d, device=x.device, dtype=x.dtype)
+    summed.index_add_(0, indices.to(x.device), x)
+
+    output = summed / batch_sizes.to(x.device).view(-1, 1).clamp(min=1e-9)
     
-    def forward(self, dowker: torch.Tensor, ptr: torch.Tensor) -> torch.Tensor:
-        """
-        Encodes a batch of disjoint Dowker sequences into node embeddings.
-
-        This method handles the conversion from global batch indices back to local 
-        sequence positions to retrieve the correct positional encodings. It then 
-        scatters these encodings into a node-centric format, concatenating the 
-        'over' and 'under' embeddings for each node.
-
-        Args:
-            dowker (torch.Tensor): The batched Dowker sequence tensor.
-                Shape: (2 * N_total, 2)
-                - Column 0: Global Node Indices. Because of the custom `__inc__` 
-                  in KnotData, these indices are cumulative across the batch 
-                  (e.g., if Graph 1 has 5 nodes, Node 0 of Graph 2 is index 5).
-                - Column 1: Over/Under flag (0 for Over, 1 for Under).
-            ptr (torch.Tensor): The batch pointer tensor from PyG.
-                Shape: (Batch_Size + 1,)
-                Contains the cumulative count of nodes in the batch (e.g., [0, N1, N1+N2, ...]).
-                Used to determine the start and end of each graph in the dense sequence.
-
-        Returns:
-            torch.Tensor: The computed embeddings for all nodes in the batch.
-                Shape: (N_total, 2 * d_model)
-                Each row corresponds to a specific node (in global order) and contains
-                the concatenation of its 'Over' positional encoding and 'Under' 
-                positional encoding.
-        """
-        
-        N = dowker.size(0) // 2
-        
-        dowker_starts = ptr[:-1] * 2
-
-        nodes_per_graph = ptr[1:] - ptr[:-1]
-        rows_per_graph = nodes_per_graph * 2
-
-        # Provide output_size to prevent CPU-GPU sync
-        shifts = dowker_starts.repeat_interleave(
-            rows_per_graph,
-            output_size=2*N
-        )
-        
-        global_seq = torch.arange(2*N, device=dowker.device)
-        local_seq = global_seq - shifts
-        
-        pe_vecs = self.pe[local_seq]
-        
-        out_flat = torch.empty(N * 2, self.d_model, device=dowker.device)
-        
-        # Instead of 2D indexing out[dowker[:,0], dowker[:,1]], we calculate the 1D index.
-        # Index = Node_ID * 2 + Over_Under_Flag (0 or 1)
-        flat_indices = dowker[:, 0] * 2 + dowker[:, 1]
-        
-        out_flat[flat_indices] = pe_vecs
-        
-        # Memory layout [Node0_Over, Node0_Under, Node1_Over...] matches expected flatten behavior
-        return out_flat.view(N, 2 * self.d_model)
+    return output
 
 class KnotAttention(nn.Module):
     """
@@ -214,7 +129,7 @@ class KnotTransformerLayer(nn.Module):
 
     Args:
         input_dim (int): Dimension of the input node features.
-            Must be divisible by `heads` to ensure dimension alignment.
+            Must be divisible by heads to ensure dimension alignment.
         d_k (int): Dimension of the query and key vectors per head.
         heads (int, optional): Number of attention heads. Defaults to 2.
         d_ff (int, optional): Hidden dimension of the Feed-Forward network. 
@@ -233,7 +148,7 @@ class KnotTransformerLayer(nn.Module):
         
         Args:
             input_dim: Dimension of the input node features.
-                Must be divisible by `heads` to ensure dimension alignment.
+                Must be divisible by heads to ensure dimension alignment.
             d_k: Dimension of the query and key vectors per head.
             heads: Number of attention heads. Defaults to 2.
             d_ff: Hidden dimension of the Feed-Forward network.
@@ -300,7 +215,7 @@ class AlphaKnot(nn.Module):
 
     Args:
         model_dim (int): Dimension of the node initial embeddings (input features).
-            It must satisfy lcm(2, heads) | model_dim due to embedding size considerations.
+            It must satisfy heads | model_dim due to embedding size considerations.
         d_k (int): Dimension of the key and query vectors in the Multi-Head Attention mechanism.
         transformer_layers (int, optional): Number of stacked KnotTransformerLayer blocks.
             Defaults to 4.
@@ -325,14 +240,13 @@ class AlphaKnot(nn.Module):
         d_ff: Optional[int] = None,
         value_dim: Optional[int] = None,
         policy_dim: Optional[int] = None,
-        max_len: int = 8400
     ) -> None:
         """
         Initialize the AlphaKnot model.
         
         Args:
             model_dim: Dimension of the node initial embeddings (input features).
-                It must satisfy lcm(2, heads) | model_dim due to embedding size considerations.
+                It must satisfy heads | model_dim due to embedding size considerations.
             d_k: Dimension of the key and query vectors in the Multi-Head Attention mechanism.
             transformer_layers: Number of stacked KnotTransformerLayer blocks.
                 Defaults to 4.
@@ -352,7 +266,7 @@ class AlphaKnot(nn.Module):
         self.value_dim = value_dim if value_dim is not None else model_dim*2
         self.policy_dim = policy_dim if policy_dim is not None else model_dim*2
 
-        self.encoder = BatchPositionalEncoding(model_dim//2)
+        self.linear = nn.Linear(6, model_dim)
 
         self.transformer_pass = nn.ModuleList([
             KnotTransformerLayer(input_dim=model_dim, d_k=d_k, heads=heads, d_ff=d_ff)
@@ -371,23 +285,18 @@ class AlphaKnot(nn.Module):
             nn.Linear(self.policy_dim, moves)
         )
 
-    def forward(self, batch: Batch) -> Tuple[torch.Tensor, torch.Tensor]:
+    # TODO: update so it concats x and neighbor_index
+    def forward(self, x, neighbor_index, batch_sizes) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Forward pass for a batch of disjoint graphs.
 
         Args:
-            batch: A PyG Batch object of KnotData instances. It should contain:
-                - dowker (torch.Tensor): Dowker sequence representation.
-                    Shape: (2 * N_total, 2)
-                - neighbor_index (torch.Tensor): Adjacency/Neighbor indices.
-                    Shape: (N_total, 4)
-                - mask (torch.Tensor): Action mask indicating invalid moves.
-                    Shape: (N_total, moves)
-                    True indicates an invalid move that should be masked out.
-                - batch (torch.Tensor): Batch vector mapping each node to its graph index.
-                    Shape: (N_total,)
-                - ptr (torch.Tensor): Graph pointer tensor.
-                    Shape: (batch_size + 1,)
+            x (torch.Tensor): Initial (N,6) embedding of the batch.
+                Shape: (N_total, 6)
+            neighbor_index (torch.Tensor): Neighbor index tensor.
+                Shape: (N_total, 4)
+            batch_sizes (torch.Tensor): A 1D tensor containing the size of each 
+                batch segment (N1, N2, ..., Nb). Shape is (b,).
 
         Returns:
             Tuple containing:
@@ -398,17 +307,12 @@ class AlphaKnot(nn.Module):
                     Shape: (batch_size,)
         """
 
-        dowker = batch.dowker
-        neighbor_index = batch.neighbor_index
-        batch_index = batch.batch
-        batch_ptr = batch.ptr
-
-        x = self.encoder(dowker, batch_ptr)
+        x = self.linear(x)
 
         for layer in self.transformer_pass:
             x = layer(x, neighbor_index)
 
-        graph_embedding = global_mean_pool(x, batch_index)
+        graph_embedding = mean_pool_index_add(x, batch_sizes)
 
         values = self.value_head(graph_embedding).squeeze(-1)
 

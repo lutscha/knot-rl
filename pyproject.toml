@@ -16,7 +16,6 @@ license = {text = "MIT"}
 dependencies = [
     "numpy",
     "torch",
-    "torch_geometric",
 ]
 
 [tool.setuptools.packages.find]
