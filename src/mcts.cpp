@@ -1,74 +1,84 @@
+#include "../include/knot.h"
+#include "../include/node.h"
+#include "../include/visit.h"
+#include <vector>
+#include <cstdint>
+#include <cstddef>
+#include <cstdlib>
+#include <iostream>
+#include <limits>
+#include <memory>
+#include <chrono>
 
+static double evaluate_knot(const Knot &knot) noexcept { //TODO FIXME
+  return -static_cast<double>(knot.n_crossings);
+}
 
-// // represents a state of a link
-// class GameState {
-// public:
-//   virtual ~GameState() = default;
+static ProbDistribution get_probs(const Knot &knot){
+  throw std::runtime_error("Not implemented");
+};
 
-//   // [PHANTOM API] - Ask the engine for valid moves
-//   virtual std::vector<Action> get_legal_actions() const = 0;
+AvailableMove mcts_select_move(const Knot &root_knot, std::size_t n_simulations) {
+  Node root(std::move(root_knot));
 
-//   // [PHANTOM API] - Ask the engine to apply a move and return a NEW state
-//   virtual std::unique_ptr<GameState>
-//   apply_action(const Action &action) const = 0;
+  // Expand root once at the start.
+  root.expand(get_probs(root.knot));
 
-//   // [PHANTOM API] - terminal condition (is this real even now)?
-//   virtual bool is_terminal() const = 0;
+  if (root.children.empty()) {
+    // No moves available; return some dummy move.
+    throw std::runtime_error("No moves available");
+  }
 
-//   // debug printing
-//   // virtual void print() const = 0;
-// };
+  for (std::size_t sim = 0; sim < n_simulations; ++sim) {
+    Node *cur = &root;
+    std::vector<Node *> path;
+    path.reserve(64);
+    path.push_back(cur);
 
-// // output of alphaknot
-// struct ModelOutput {
-//   double value; // [-1, 1] (1 = Unknot found, -1 = Dead end)
-//   std::vector<double> policy_logits; // Raw scores for each action
-// };
+    // SELECTION
+    while (cur->is_expanded && !cur->children.empty()) {
+      Child *child = cur->select_best_child();
+      if (!child) {
+        break;
+      }
+      // child->compute() is guaranteed to have been called in select_best_child
+      // if needed, so node is non-null here.
+      cur = child->node.get();
+      path.push_back(cur);
+    }
 
-// // alphaknot
-// namespace AlphaKnotAPI {
-// // [PHANTOM API] - Call your PyTorch/TensorFlow model here
-// ModelOutput evaluate(const GameState &state,
-//                      const std::vector<Action> &legal_moves) {
+    // EXPANSION
+    if (!cur->is_expanded) {
+      ProbDistribution prob_distribution = get_probs(cur->knot);
+      cur->expand(prob_distribution);
+    }
 
-//   // Mock return for compilation:
-//   ModelOutput output;
-//   output.value = -0.1; // Slight negative bias for non-terminal
-//   output.policy_logits.resize(legal_moves.size(), 1.0); // Uniform distribution
-//   return output;
-// }
-// } // namespace AlphaKnotAPI
+    // EVALUATION
+    const double value = evaluate_knot(cur->knot);
 
-// // ==================================================================================
-// // actual MCTS code starts here
-// // ==================================================================================
+    // BACKPROPAGATION
+    for (Node *n : path) {
+      n->n_visits += 1;
+      n->value += value;
+    }
+  }
 
-// struct MCTSNode {
+  // Choose the root child with maximum visit count.
+  Child *best_child = nullptr;
+  uint32_t best_visits = 0;
 
-//   double value_sum = 0.0;
-//   double prior = 0.0; // p(s,a)
+  for (auto &child : root.children) {
+    uint32_t v = child.n_visits();
+    if (v > best_visits) {
+      best_visits = v;
+      best_child = &child;
+    }
+  }
 
-//   int32_t parent = -1;
-//   int32_t first_child = -1;  // Head of linked list of children
-//   int32_t next_sibling = -1; // Next node in the sibling list
+  if (!best_child) {
+    // Fallback, should not happen if root.children was non-empty.
+    std::cerr << "No best child found" << std::endl;
+  }
 
-//   // Action (4 bytes + padding typically)
-//   Action action_leading_here;
-
-//   // Metadata (4 bytes)
-//   int32_t visits = 0;
-
-//   // Flags (1 byte)
-//   bool is_expanded = false;
-
-//   // Constructor
-//   MCTSNode(int32_t p, Action a, double prior_p)
-//       : value_sum(0.0), prior(prior_p), parent(p), first_child(-1),
-//         next_sibling(-1), action_leading_here(a), visits(0),
-//         is_expanded(false) {}
-
-//   // U-Value: The exploration bonus (PUCT formula)
-//   double u_value(double parent_sqrt_visits, double cpuct) const {
-//     return cpuct * prior * parent_sqrt_visits / (1.0 + visits);
-//   }
-// };
+  return best_child->move;
+}
