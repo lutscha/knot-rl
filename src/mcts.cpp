@@ -1,10 +1,10 @@
-#include <vector>
+#include "../include/visit.h"
+#include "../include/knot.h"
 #include <cmath>
+#include <cstdint>
 #include <memory>
-#include <limits>
-#include <algorithm>
-#include <iostream>
-#include <random>
+#include <unordered_set>
+#include <vector>
 
 // ==================================================================================
 // Boilerplate API calls to the engine which need to be optimized later. These are
@@ -16,6 +16,45 @@ struct Action {
     int id;
     // internal: uint16_t v, ReidemeisterMove move;
     bool operator==(const Action& other) const { return id == other.id; }
+};
+
+
+struct Node;
+
+struct Child {
+  ReidemeisterMove move;
+  Node* node;
+};
+
+struct Node {
+  Knot knot;
+  std::vector<Child> children;
+
+  std::unordered_set<uint64_t> &visited_hashes;
+
+  uint32_t n_visits = 0;
+  bool is_expanded = false;
+  double value = 0.0;
+
+  Node(Knot knot, std::unordered_set<uint64_t> &visited_hashes) : 
+    knot(knot), visited_hashes(visited_hashes) {}
+
+
+  void expand() {
+    is_expanded = true;
+    for (auto m : knot.moves()) {
+      Knot child_knot = knot.apply_move(m.v, m.move);
+
+
+
+      if (visited_hashes.find(child_knot.hash_) != visited_hashes.end()) {
+        continue;
+      } 
+      Node child_node =  Node(child_knot, visited_hashes);
+
+      children.push_back(Child{m.move, &child_node});
+    }
+  }
 };
 
 // represents a state of a link
