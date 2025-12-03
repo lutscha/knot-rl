@@ -2,106 +2,111 @@
 
 #include <atomic>
 #include <cstdint>
+#include <functional>
 #include <pthread.h>
 #include <stdexcept>
+#include <string>
 
-//#include <cuda_runtime.h>
+#include <cuda_runtime.h>
 #include <torch/script.h>
 #include <torch/torch.h>
 
-constexpr uint16_t MAX_CROSSINGS = 1000; // >>16*E[num_nodes per worker]
-constexpr uint16_t BATCH_SIZE = 16;      // number of workers
-constexpr uint16_t TOTAL_CROSSINGS = MAX_CROSSINGS * BATCH_SIZE; // number of workers
+constexpr int64_t MAX_CROSSINGS = 1000;
+constexpr int64_t BATCH_SIZE = 16;
+constexpr int64_t TOTAL_CROSSINGS = MAX_CROSSINGS * BATCH_SIZE;
 
-constexpr uint16_t GRAPH_DEGREE = 4;
-constexpr uint16_t NUM_FEATURES = 4 + 1 + 1;
-constexpr uint16_t N_MOVES = 10;
+constexpr int64_t GRAPH_DEGREE = 4;
+constexpr int64_t NUM_FEATURES = 4 + 1 + 1;
+constexpr int64_t N_MOVES = 10;
 
 struct SharedArena {
-  // atomics here?
-  std::atomic<int> curr_row;
+  std::atomic<uint16_t> curr_row{0};
 
-  // Process-Shared Mutex/CondVar (Requires PTHREAD_PROCESS_SHARED attribute
-  // during init)
   pthread_mutex_t mutex;
-  pthread_cond_t cond_read_ready;  // Workers wait on this
-  pthread_cond_t cond_write_ready; // Server waits on this
+  pthread_cond_t cond_read_ready;
+  pthread_cond_t cond_write_ready;
 
-  uint16_t node_counts[BATCH_SIZE];     // how many nodes per worker, needed by model
-  float value_outputs[BATCH_SIZE]; // values returned by AlphaKnot
+  // inputs
+  uint16_t node_counts[BATCH_SIZE];
+  uint16_t input_graph[TOTAL_CROSSINGS][GRAPH_DEGREE];
+  float input_features[TOTAL_CROSSINGS][NUM_FEATURES];
 
-  uint16_t input_graph[TOTAL_CROSSINGS] [GRAPH_DEGREE]; // workers write their data // here, 6
-                                      // embedding + 4
-  uint16_t input_features[TOTAL_CROSSINGS] [NUM_FEATURES]; // workers write their data here, 6
-                                         // embedding + 4
-  double output_tensor[TOTAL_CROSSINGS][N_MOVES]; // logits are stored here,
-                                                  // N_MOVES moves per node
+  // outputs
+  float output_tensor[TOTAL_CROSSINGS][N_MOVES];
+  float value_outputs[BATCH_SIZE];
 };
-
-// called by server to run inference
-// TODO: this might be suboptimal considering the model gets updated every once
-// in a while
-
-// the transfers here should be
-// Worker Write: CPU Registers → Shared RAM (Zero Copy: Direct write).
-// Model Input: Shared RAM → GPU VRAM (Hardware Copy: PCIe DMA).
-//     - Note: Triggered transparently by the model reading the mapped memory.
-// Model Exec: GPU VRAM → GPU Cores → GPU VRAM (Internal).
-// Result Capture: GPU VRAM → Shared RAM (Hardware Copy: PCIe DMA via .copy_()).
-// Worker Read: Shared RAM → CPU Registers (Zero Copy: Direct read).
 
 class InferenceServer {
   SharedArena *arena;
 
-  void *d_input_ptr;
-  void *d_count_ptr;
-  void *d_output_ptr;
-  void *d_value_ptr;
-  // list of pointers to workers for waking them up as well perhaps?
+  void *d_node_counts = nullptr;
+  void *d_input_graph = nullptr;
+  void *d_input_features = nullptr;
+
+  void *d_output_tensor = nullptr;
+  void *d_value_outputs = nullptr;
+
+  // Small helper that hides the cudaHostGetDevicePointer boilerplate.
+  static void *mapPinnedDevicePtr(void *host_ptr) {
+    void *dev_ptr = nullptr;
+    auto err = cudaHostGetDevicePointer(&dev_ptr, host_ptr, 0);
+    if (err != cudaSuccess) {
+      throw std::runtime_error(
+          std::string("cudaHostGetDevicePointer failed for ") +
+          std::string(cudaGetErrorString(err)));
+    }
+    return dev_ptr;
+  }
 
 public:
-  InferenceServer(SharedArena *a) : arena(a) {
-    // using synchronized batching so these are fixed
-    cudaHostGetDevicePointer(&d_input_ptr, arena->input_tensor, 0);
-    cudaHostGetDevicePointer(&d_count_ptr, arena->node_counts, 0);
-    cudaHostGetDevicePointer(&d_output_ptr, arena->output_tensor, 0);
-    cudaHostGetDevicePointer(&d_value_ptr, arena->value_outputs, 0);
-
+  explicit InferenceServer(SharedArena *a) : arena(a) {
+    d_node_counts = mapPinnedDevicePtr(arena->node_counts);
+    d_input_graph = mapPinnedDevicePtr(arena->input_graph);
+    d_input_features = mapPinnedDevicePtr(arena->input_features);
+    d_output_tensor = mapPinnedDevicePtr(arena->output_tensor);
+    d_value_outputs = mapPinnedDevicePtr(arena->value_outputs);
   }
 
   void run_inference(torch::jit::script::Module &model) {
-
-
-    int total_rows = arena->curr_row.load();
+    const int64_t total_rows = arena->curr_row.load(std::memory_order_acquire);
+    if (total_rows == 0) {
+      return;
+    }
 
     auto float_opts =
         torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32);
     auto int_opts =
-        torch::TensorOptions().device(torch::kCUDA).dtype(torch::kInt32);
+        torch::TensorOptions().device(torch::kCUDA).dtype(torch::kInt16);
 
-    // these are zero-copy views
-    auto input_gpu_view =
-        torch::from_blob(d_input_ptr, {total_rows, 10}, float_opts);
-    auto counts_gpu_view = torch::from_blob(d_count_ptr, {16}, int_opts);
+    // zero-copy views on mapped host memory (as device pointers)
+    auto input_gpu_view = torch::from_blob(
+        d_input_features, {total_rows, NUM_FEATURES}, float_opts);
+
+    auto counts_gpu_view =
+        torch::from_blob(d_node_counts, {BATCH_SIZE}, int_opts);
+
+    auto graph_gpu_view =
+        torch::from_blob(d_input_graph, {total_rows, GRAPH_DEGREE}, int_opts);
 
     auto output_tuple =
-        model.forward({input_gpu_view, counts_gpu_view}).toTuple();
+        model.forward({counts_gpu_view, graph_gpu_view, input_gpu_view }).toTuple();
 
-    torch::Tensor out_tensor_gpu = output_tuple->elements()[0].toTensor();
-    torch::Tensor out_scalars_gpu = output_tuple->elements()[1].toTensor();
+    torch::Tensor policy =
+        output_tuple->elements()[0].toTensor(); // [total_rows, N_MOVES]
+    torch::Tensor values =
+        output_tuple->elements()[1].toTensor(); // [BATCH_SIZE]
 
-    // copy happens here
     auto output_arena_view =
-        torch::from_blob(d_output_ptr, {total_rows, 10}, float_opts);
-    output_arena_view.copy_(out_tensor_gpu);
+        torch::from_blob(d_output_tensor, {total_rows, N_MOVES}, float_opts);
 
-    auto value_arena_view = torch::from_blob(d_value_ptr, {16}, float_opts);
-    value_arena_view.copy_(out_scalars_gpu);
+    output_arena_view.copy_(policy);
 
-    // blocks until copy is finished for sync, is this necessary?
+    auto value_arena_view =
+        torch::from_blob(d_value_outputs, {BATCH_SIZE}, float_opts);
+    value_arena_view.copy_(values);
+
     cudaDeviceSynchronize();
 
-    arena->curr_row_ptr.store(0);
-    arena->active_batches.store(0);
+    arena->curr_row.store(0, std::memory_order_release);
   }
 };
