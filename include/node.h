@@ -9,11 +9,6 @@
 
 constexpr double c = 0.1;
 
-struct ProbDistribution {
-  double get_prob(const AvailableMove &move) const {
-    return 0.0;
-  }
-};
 
 struct Node;
 
@@ -39,6 +34,8 @@ struct Child {
   void compute();
 };
 
+struct SharedArena;
+
 struct Node {
   Knot knot;
   std::vector<Child> children;
@@ -48,19 +45,6 @@ struct Node {
   double value = 0.0;
 
   Node(Knot knot) : knot(std::move(knot)) {}
-
-  void expand(const ProbDistribution &prob_distribution) {
-    if (is_expanded) {
-      std::cerr << "Node already expanded" << std::endl;
-      return;
-    }
-
-    is_expanded = true;
-    for (auto m : knot.moves()) {
-      double p = prob_distribution.get_prob(m);
-      children.push_back(Child(this, m, p));
-    }
-  }
 
   Child *select_best_child() noexcept {
     if (children.empty()) {
@@ -83,6 +67,8 @@ struct Node {
     }
     return best_child;
   }
+
+  double expand(SharedArena &arena);
 };
 
 uint32_t Child::n_visits() const noexcept {

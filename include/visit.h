@@ -5,6 +5,9 @@
 #include <iostream>
 #include <sys/types.h>
 
+static constexpr uint16_t MAX_CROSSINGS = 1200;
+static constexpr uint16_t N_MOVES = 10;
+
 enum class Orientation { pos = 0, neg = 1 };
 
 inline Orientation operator!(Orientation orient) noexcept {
@@ -183,13 +186,11 @@ struct Visit {
   static constexpr uint8_t MOVES_FIRST_BIT = R1_NEG_SHIFT;
   static constexpr uint8_t MOVES_LAST_BIT = R4_SHIFT + N_R4_MOVES;
 
-  static constexpr uint8_t R3_ARG_SHIFT(const Direction dir_a,
-                                        const Direction dir_c) noexcept {
-    return R3_SHIFT + uint8_t(dir_a) + 2 * uint8_t(dir_c);
+  static constexpr uint8_t R3_ARG_SHIFT(const Direction dir_over, const Direction dir_under) noexcept {
+    return R3_SHIFT + uint8_t(dir_over) + 2 * uint8_t(dir_under);
   }
 
-  static constexpr uint8_t R4_ARG_SHIFT(const Direction dir,
-                                        const VisitType type) noexcept {
+  static constexpr uint8_t R4_ARG_SHIFT(const Direction dir, const VisitType type) noexcept {
     return R4_SHIFT + uint8_t(dir) + 2 * uint8_t(type);
   }
 
@@ -202,7 +203,7 @@ struct Visit {
   static constexpr uint16_t R4_MASK = 0b1111 << R4_SHIFT;
   static constexpr uint16_t MOVES_MASK = R1_NEG | R2_NEG | R3_MASK | R4_MASK;
 
-  static inline ReidemeisterMove GET_DIRECT_MOVE(uint8_t bit) noexcept {
+  static inline ReidemeisterMove BIT_TO_MOVE(uint8_t bit) noexcept {
     if (bit < MOVES_FIRST_BIT || bit >= MOVES_LAST_BIT) [[unlikely]] {
       std::cerr << "Invalid move bit: " << bit << std::endl;
     }
@@ -225,6 +226,25 @@ struct Visit {
     Direction dir = Direction(r4_arg_shift & 1);
     VisitType type = VisitType((r4_arg_shift >> 1) & 1);
     return ReidemeisterMove::R4_pos(dir, type);
+  }
+
+  static inline uint16_t MOVE_TO_BIT(ReidemeisterMove move) {
+    switch (move.kind) {
+    case ReidemeisterKind::R1_neg:
+      return R1_NEG_SHIFT;
+    case ReidemeisterKind::R1_pos:
+      std::cerr << "R1_pos has no bit" << std::endl;
+      exit(1);
+    case ReidemeisterKind::R2_neg:
+      return R2_NEG_SHIFT;
+    case ReidemeisterKind::R2_pos:
+      std::cerr << "R2_pos has no bit" << std::endl;
+      exit(1);
+    case ReidemeisterKind::R3:
+      return R3_SHIFT + Visit::R3_ARG_SHIFT(move.dir_over(), move.dir_under());
+    case ReidemeisterKind::R4_pos:
+      return R4_SHIFT + move.args;
+    }
   }
 
   uint16_t mate;
@@ -251,8 +271,8 @@ struct Visit {
 
   inline bool is_bigon() const noexcept { return flags & R2_NEG; }
 
-  inline bool is_triangle(Direction dir_a, Direction dir_c) const noexcept {
-    return (flags >> R3_ARG_SHIFT(dir_a, dir_c)) & 1;
+  inline bool is_triangle(Direction dir_over, Direction dir_under) const noexcept {
+    return (flags >> R3_ARG_SHIFT(dir_over, dir_under)) & 1;
   }
 
   inline bool is_R4(Direction dir, VisitType type) const noexcept {

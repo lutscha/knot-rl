@@ -21,22 +21,7 @@
 #define KNOT_PRAGMA_IVDEP
 #endif
 
-static constexpr uint16_t MAX_CROSSINGS = 1200;
-
-struct Vertex {
-  uint16_t under[2];
-  uint16_t over[2];
-  uint16_t flags;
-
-  inline Vertex() : under{0, 0}, over{0, 0}, flags(0) {}
-
-  Vertex(uint16_t under[2], uint16_t over[2], uint16_t flags) : flags(flags) {
-    for (uint16_t i = 0; i < 2; i++) {
-      this->under[i] = under[i];
-      this->over[i] = over[i];
-    }
-  }
-};
+using Vertex = uint16_t[4];
 
 struct FacialLengths {
   uint16_t len[2][2];
@@ -413,8 +398,8 @@ public: // constructors
     verify_invariant();
   }
 
-
-  Link<static_n_components> apply_move(uint16_t v, ReidemeisterMove move) const {
+  Link<static_n_components> apply_move(uint16_t v,
+                                       ReidemeisterMove move) const {
     if (n_crossings == 0) [[unlikely]] {
       if (move.kind != ReidemeisterKind::R1_pos || v != 0) {
         std::cerr << "Invalid move: only positive R1 with v=0 is allowed on "
@@ -763,6 +748,11 @@ public: // constructors
     return a % 2 == 0 ? a / 2 : mate(a) / 2;
   }
 
+  inline Orientation vertex_sign(uint16_t v) const noexcept {
+    const uint16_t a = over_visit_index(v);
+    return Visit::GET_SIGN(visits[a].flags);
+  }
+
   inline uint16_t over_visit_index(uint16_t v) const noexcept {
     const uint16_t a = 2 * v;
     return Visit::GET_TYPE(flags(a)) == VisitType::over ? a : mate(a);
@@ -773,29 +763,34 @@ public: // constructors
     return visits[a].moves_flags();
   }
 
-  inline uint16_t vertex_flags(uint16_t a) const noexcept {
-    return visits[a].type() == VisitType::over ? visits[a].flags
-                                               : visits[mate(a)].flags;
+  static uint16_t dart_index(VisitType type, Direction dir) noexcept {
+    const uint16_t type_idx = static_cast<uint16_t>(type);
+    const uint16_t dir_idx = static_cast<uint16_t>(dir);
+
+    return type_idx + (dir_idx << 1);
   }
 
-  void to_graph(Vertex *out) const noexcept {
-
+  uint16_t to_graph(Vertex *out) const noexcept {
     for (uint16_t a = 0; a < 2 * n_crossings; a += 2) {
       Vertex &v = out[vertex_index(a)];
-
-      v.over[static_cast<uint16_t>(Direction::next)] = vertex_index(next(a));
-      v.over[static_cast<uint16_t>(Direction::prev)] = vertex_index(prev(a));
-      v.under[static_cast<uint16_t>(Direction::next)] =
+      v[dart_index(VisitType::over, Direction::next)] = vertex_index(next(a));
+      v[dart_index(VisitType::over, Direction::prev)] = vertex_index(prev(a));
+      v[dart_index(VisitType::under, Direction::next)] =
           vertex_index(next(mate(a)));
-      v.under[static_cast<uint16_t>(Direction::prev)] =
+      v[dart_index(VisitType::under, Direction::prev)] =
           vertex_index(prev(mate(a)));
-      v.flags = vertex_flags(a);
     }
+    return n_crossings;
   }
 
   uint16_t visits_until_mate(uint16_t a, uint16_t comp_size) const noexcept {
     uint16_t b = mate(a);
     return b >= a ? (b - a + 1) / 2 : (comp_size + b - a + 1) / 2;
+  }
+
+  uint16_t visits_until_self(uint16_t v) const noexcept {
+    const uint16_t a = over_visit_index(v);
+    return visits[a].visits_until_self();
   }
 
   uint64_t hash() const noexcept {
@@ -988,13 +983,14 @@ public:
   uint16_t moves_flags;
 
   AvailableMove operator*() const noexcept {
-    return AvailableMove(v, Visit::GET_DIRECT_MOVE(bit));
+    return AvailableMove(v, Visit::BIT_TO_MOVE(bit));
   }
 
   MoveIterator &operator++() noexcept {
-    if (moves_flags >> (bit + 1)) {
-      auto casted = static_cast<unsigned>(moves_flags >> (bit + 1));
-      bit = std::countr_zero(casted) + bit + 1;
+    bit++;
+    if (moves_flags >> bit) {
+      auto casted = static_cast<unsigned>(moves_flags >> bit);
+      bit = std::countr_zero(casted) + bit;
     } else {
       do {
         ++a;

@@ -7,12 +7,10 @@
 #include <stdexcept>
 #include <string>
 
+#include "arena.h"
 #include <cuda_runtime.h>
 #include <torch/script.h>
 #include <torch/torch.h>
-#include "arena.h"
-
-
 
 class InferenceServer {
 public:
@@ -58,7 +56,8 @@ public:
       throw std::runtime_error("pthread_cond_init(cond_write_ready) failed");
     }
 
-    auto cerr =cudaHostRegister(arena, sizeof(SharedArena), cudaHostRegisterMapped);
+    auto cerr =
+        cudaHostRegister(arena, sizeof(SharedArena), cudaHostRegisterMapped);
     if (cerr != cudaSuccess) [[unlikely]] {
       pthread_cond_destroy(&arena->cond_write_ready);
       pthread_cond_destroy(&arena->cond_read_ready);
@@ -73,45 +72,57 @@ public:
     d_facial_lengths = mapPinnedDevicePtr<int16_t>(arena->facial_lengths);
     d_other_features = mapPinnedDevicePtr<int16_t>(arena->other_features);
 
-    d_output_tensor = mapPinnedDevicePtr<float>(arena->output_tensor);
-    d_value_outputs = mapPinnedDevicePtr<float>(arena->value_outputs);
+    d_output_tensor = mapPinnedDevicePtr<float>(arena->probs);
+    d_value_outputs = mapPinnedDevicePtr<float>(arena->values);
   }
 
   void run_inference(const torch::jit::script::Module &model) {
-    const int64_t total_rows = arena->curr_row.load(std::memory_order_acquire);
+    const int64_t total_rows = arena->cur_row.load(std::memory_order_acquire);
     if (total_rows <= 0) {
       return;
     }
 
-    auto float_opts =  torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32);
-    auto int_opts = torch::TensorOptions().device(torch::kCUDA).dtype(torch::kInt16);
+    auto float_opts =
+        torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32);
+    auto int_opts =
+        torch::TensorOptions().device(torch::kCUDA).dtype(torch::kInt16);
 
     // zero-copy views on mapped host memory (as device pointers)
 
-    auto counts_gpu_view = torch::from_blob(d_crossing_counts, {BATCH_SIZE}, int_opts);
+    auto counts_gpu_view =
+        torch::from_blob(d_crossing_counts, {BATCH_SIZE}, int_opts);
 
-    auto graph_gpu_view =  torch::from_blob(d_graph, {total_rows, GRAPH_DEGREE}, int_opts);
+    auto graph_gpu_view =
+        torch::from_blob(d_graph, {total_rows, GRAPH_DEGREE}, int_opts);
 
-    auto other_features_gpu_view = torch::from_blob(d_other_features, {total_rows, N_OTHER_FEATURES}, int_opts);
+    auto other_features_gpu_view = torch::from_blob(
+        d_other_features, {total_rows, N_OTHER_FEATURES}, int_opts);
 
-    auto facial_lengths_gpu_view = torch::from_blob(d_facial_lengths, {total_rows, N_FACES}, int_opts);
+    auto facial_lengths_gpu_view =
+        torch::from_blob(d_facial_lengths, {total_rows, N_FACES}, int_opts);
 
-    auto output_tuple = model
-            .forward({facial_lengths_gpu_view, other_features_gpu_view, graph_gpu_view, counts_gpu_view})
+    auto output_tuple =
+        model
+            .forward({facial_lengths_gpu_view, other_features_gpu_view,
+                      graph_gpu_view, counts_gpu_view})
             .toTuple();
 
-    torch::Tensor policy = output_tuple->elements()[0].toTensor(); // [total_rows, N_MOVES]
-    torch::Tensor values =  output_tuple->elements()[1].toTensor(); // [BATCH_SIZE]
+    torch::Tensor policy =
+        output_tuple->elements()[0].toTensor(); // [total_rows, N_MOVES]
+    torch::Tensor values =
+        output_tuple->elements()[1].toTensor(); // [BATCH_SIZE]
 
-    auto output_arena_view = torch::from_blob(d_output_tensor, {total_rows, N_MOVES}, float_opts);
+    auto output_arena_view =
+        torch::from_blob(d_output_tensor, {total_rows, N_MOVES}, float_opts);
 
     output_arena_view.copy_(policy);
 
-    auto value_arena_view = torch::from_blob(d_value_outputs, {BATCH_SIZE}, float_opts);
+    auto value_arena_view =
+        torch::from_blob(d_value_outputs, {BATCH_SIZE}, float_opts);
     value_arena_view.copy_(values);
 
     cudaDeviceSynchronize();
 
-    arena->curr_row.store(0, std::memory_order_release);
+    arena->cur_row.store(0, std::memory_order_release);
   }
 };

@@ -9,34 +9,44 @@
 #include <limits>
 #include <memory>
 #include <chrono>
+#include "../include/arena.h"
 
-static double evaluate_knot(const Knot &knot) noexcept { //TODO FIXME
-  return -static_cast<double>(knot.n_crossings);
-}
+// static InferenceServer inference_server;
 
-static ProbDistribution get_probs(const Knot &knot){
-  throw std::runtime_error("Not implemented");
+constexpr uint16_t TO_RESERVE = 256;
+
+
+static float** get_probs(const Knot &knot){
+  return nullptr;
 };
 
-AvailableMove mcts_select_move(const Knot &root_knot, std::size_t n_simulations) {
+AvailableMove mcts_select_move(const Knot root_knot, std::size_t n_simulations) {
   Node root(std::move(root_knot));
 
   // Expand root once at the start.
-  root.expand(get_probs(root.knot));
+
+  root.expand();
 
   if (root.children.empty()) {
     // No moves available; return some dummy move.
     throw std::runtime_error("No moves available");
   }
 
+
   for (std::size_t sim = 0; sim < n_simulations; ++sim) {
     Node *cur = &root;
     std::vector<Node *> path;
-    path.reserve(64);
+    path.reserve(TO_RESERVE);
     path.push_back(cur);
 
     // SELECTION
     while (cur->is_expanded && !cur->children.empty()) {
+      // for (auto &child : cur->children) {
+      //   if (!child.is_computed) {
+      //     child.compute();
+      //   }
+      // }
+
       Child *child = cur->select_best_child();
       if (!child) {
         break;
@@ -47,14 +57,13 @@ AvailableMove mcts_select_move(const Knot &root_knot, std::size_t n_simulations)
       path.push_back(cur);
     }
 
-    // EXPANSION
-    if (!cur->is_expanded) {
-      ProbDistribution prob_distribution = get_probs(cur->knot);
-      cur->expand(prob_distribution);
+    if (cur->is_expanded) {
+      std::cout << "Node already expanded" << std::endl;
+      continue;
     }
 
-    // EVALUATION
-    const double value = evaluate_knot(cur->knot);
+    // EXPANSION
+    const double value = cur->expand();
 
     // BACKPROPAGATION
     for (Node *n : path) {
@@ -81,4 +90,14 @@ AvailableMove mcts_select_move(const Knot &root_knot, std::size_t n_simulations)
   }
 
   return best_child->move;
+}
+
+Knot mcts_run(const Knot &knot, std::size_t n_simulations) {
+  Knot cur = knot;
+  for (std::size_t sim = 0; sim < n_simulations; ++sim) {
+    AvailableMove move = mcts_select_move(cur, knot.n_crossings * 10);
+    cur = cur.apply_move(move.v, move.move);
+    std::cout << "Simulation: " << sim << " " << move.move << " on " << move.v << ", n_crossings: " << cur.n_crossings << std::endl;
+  }
+  return cur;
 }
