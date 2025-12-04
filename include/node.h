@@ -10,7 +10,9 @@
 constexpr double c = 0.1;
 
 struct ProbDistribution {
-  double get_prob(const AvailableMove &move) const noexcept;
+  double get_prob(const AvailableMove &move) const {
+    return 0.0;
+  }
 };
 
 struct Node;
@@ -30,8 +32,8 @@ struct Child {
   // Q-Value: The average value of this node (defined after Node)
   double q_value() const noexcept;
 
-  double puct(double parent_visits) const {
-    return q_value() + c * p * std::sqrt(parent_visits) / (1.0 + n_visits());
+  double puct(double sqrt_parent_visits) const {
+    return q_value() + c * p * sqrt_parent_visits / (1.0 + n_visits());
   }
 
   void compute();
@@ -47,7 +49,7 @@ struct Node {
 
   Node(Knot knot) : knot(std::move(knot)) {}
 
-  void expand(ProbDistribution &prob_distribution) {
+  void expand(const ProbDistribution &prob_distribution) {
     if (is_expanded) {
       std::cerr << "Node already expanded" << std::endl;
       return;
@@ -67,10 +69,10 @@ struct Node {
     }
 
     double best_puct = -std::numeric_limits<double>::infinity();
-    ;
+    double sqrt_n_visits = std::sqrt(n_visits);
     Child *best_child = nullptr;
     for (auto &child : children) {
-      double puct = child.puct(n_visits);
+      double puct = child.puct(sqrt_n_visits);
       if (puct > best_puct) {
         best_puct = puct;
         best_child = &child;

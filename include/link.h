@@ -413,8 +413,8 @@ public: // constructors
     verify_invariant();
   }
 
-  Link<static_n_components> apply_move(uint16_t v,
-                                       ReidemeisterMove move) const {
+
+  Link<static_n_components> apply_move(uint16_t v, ReidemeisterMove move) const {
     if (n_crossings == 0) [[unlikely]] {
       if (move.kind != ReidemeisterKind::R1_pos || v != 0) {
         std::cerr << "Invalid move: only positive R1 with v=0 is allowed on "

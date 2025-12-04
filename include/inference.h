@@ -10,31 +10,9 @@
 #include <cuda_runtime.h>
 #include <torch/script.h>
 #include <torch/torch.h>
+#include "arena.h"
 
-constexpr int64_t MAX_CROSSINGS = 1000;
-constexpr int64_t BATCH_SIZE = 16;
-constexpr int64_t TOTAL_CROSSINGS = MAX_CROSSINGS * BATCH_SIZE;
 
-constexpr int64_t GRAPH_DEGREE = 4;
-constexpr int64_t NUM_FEATURES = 4 + 1 + 1;
-constexpr int64_t N_MOVES = 10;
-
-struct SharedArena {
-  std::atomic<int64_t> curr_row{0};
-
-  pthread_mutex_t mutex;
-  pthread_cond_t cond_read_ready;
-  pthread_cond_t cond_write_ready;
-
-  // inputs
-  int16_t crossing_counts[BATCH_SIZE];
-  int16_t input_graph[TOTAL_CROSSINGS][GRAPH_DEGREE];
-  int16_t input_features[TOTAL_CROSSINGS][NUM_FEATURES];
-
-  // outputs
-  float output_tensor[TOTAL_CROSSINGS][N_MOVES];
-  float value_outputs[BATCH_SIZE];
-};
 
 class InferenceServer {
 public:
@@ -42,8 +20,9 @@ public:
 
 private:
   int16_t *d_crossing_counts = nullptr;
-  int16_t *d_input_graph = nullptr;
-  int16_t *d_input_features = nullptr;
+  int16_t *d_graph = nullptr;
+  int16_t *d_facial_lengths = nullptr;
+  int16_t *d_other_features = nullptr;
 
   float *d_output_tensor = nullptr;
   float *d_value_outputs = nullptr;
@@ -79,8 +58,7 @@ public:
       throw std::runtime_error("pthread_cond_init(cond_write_ready) failed");
     }
 
-    auto cerr =
-        cudaHostRegister(arena, sizeof(SharedArena), cudaHostRegisterMapped);
+    auto cerr =cudaHostRegister(arena, sizeof(SharedArena), cudaHostRegisterMapped);
     if (cerr != cudaSuccess) [[unlikely]] {
       pthread_cond_destroy(&arena->cond_write_ready);
       pthread_cond_destroy(&arena->cond_read_ready);
@@ -91,8 +69,9 @@ public:
     }
 
     d_crossing_counts = mapPinnedDevicePtr<int16_t>(arena->crossing_counts);
-    d_input_graph = mapPinnedDevicePtr<int16_t>(arena->input_graph);
-    d_input_features = mapPinnedDevicePtr<int16_t>(arena->input_features);
+    d_graph = mapPinnedDevicePtr<int16_t>(arena->graph);
+    d_facial_lengths = mapPinnedDevicePtr<int16_t>(arena->facial_lengths);
+    d_other_features = mapPinnedDevicePtr<int16_t>(arena->other_features);
 
     d_output_tensor = mapPinnedDevicePtr<float>(arena->output_tensor);
     d_value_outputs = mapPinnedDevicePtr<float>(arena->value_outputs);
@@ -108,14 +87,18 @@ public:
     auto int_opts = torch::TensorOptions().device(torch::kCUDA).dtype(torch::kInt16);
 
     // zero-copy views on mapped host memory (as device pointers)
-    auto features_gpu_view = torch::from_blob(
-        d_input_features, {total_rows, NUM_FEATURES}, int_opts);
 
     auto counts_gpu_view = torch::from_blob(d_crossing_counts, {BATCH_SIZE}, int_opts);
 
-    auto graph_gpu_view =  torch::from_blob(d_input_graph, {total_rows, GRAPH_DEGREE}, int_opts);
+    auto graph_gpu_view =  torch::from_blob(d_graph, {total_rows, GRAPH_DEGREE}, int_opts);
 
-    auto output_tuple =  model.forward({features_gpu_view, graph_gpu_view, counts_gpu_view}).toTuple();
+    auto other_features_gpu_view = torch::from_blob(d_other_features, {total_rows, N_OTHER_FEATURES}, int_opts);
+
+    auto facial_lengths_gpu_view = torch::from_blob(d_facial_lengths, {total_rows, N_FACES}, int_opts);
+
+    auto output_tuple = model
+            .forward({facial_lengths_gpu_view, other_features_gpu_view, graph_gpu_view, counts_gpu_view})
+            .toTuple();
 
     torch::Tensor policy = output_tuple->elements()[0].toTensor(); // [total_rows, N_MOVES]
     torch::Tensor values =  output_tuple->elements()[1].toTensor(); // [BATCH_SIZE]
