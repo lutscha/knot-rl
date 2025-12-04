@@ -434,16 +434,17 @@ class AlphaKnotLoss(torch.nn.Module):
 
         batch_counts = batch_counts.long()
         target_vals = target_vals.long()
+        target_probs = target_probs.long()
 
         # create batch indices: [0, 0, 0, 1, 1, 2, 2, 2...]
         batch_indices = torch.repeat_interleave(
             torch.arange(len(batch_counts), device=logits.device), 
-            batch_counts.long()
+            batch_counts
         )
 
         # get sum of visits per per example in batch
         probs_sum = target_probs.sum(dim=1)
-        batch_visit_counts = torch.zeros(len(batch_counts), dtype=torch.double)
+        batch_visit_counts = torch.zeros(len(batch_counts), dtype=torch.long)
         batch_visit_counts.index_add_(0, batch_indices, probs_sum)
 
         linear_term_nodes = (target_probs * logits).sum(dim=1)
@@ -455,12 +456,10 @@ class AlphaKnotLoss(torch.nn.Module):
         exp_logits_nodes = torch.exp(logits).sum(dim=1)
         z_graph = torch.zeros(len(batch_counts), device=logits.device)
         z_graph.index_add_(0, batch_indices, exp_logits_nodes)
-        
+
         log_z_graph = torch.log(z_graph + 1e-9)
 
-        loss_policy_graph = log_z_graph - linear_term_graph
-        loss_policy_graph = loss_policy_graph / (batch_visit_counts + 1e-9)
+        loss_policy_graph = log_z_graph - linear_term_graph / (batch_visit_counts + 1e-9)
 
         loss_policy = loss_policy_graph.mean()
-
         return loss_val + loss_policy

@@ -53,26 +53,9 @@ public:
     void train_step() {
         // replay buffer blackbox!!!!!!!!!!!!
         // -------------------------------
-        TrainingBatch batch = Examples();
-        if (batch.total_rows == 0) return;
-
-        auto x = torch::tensor(batch.input_features, torch::dtype(torch::kInt16))
-                    .view({-1, NUM_FEATURES})
-                    .to(device);
-        
-        auto graph = torch::tensor(batch.input_graph, torch::dtype(torch::kInt16))
-                        .view({-1, GRAPH_DEGREE})
-                        .to(device);
-        
-        auto counts = torch::tensor(batch.crossing_counts, torch::dtype(torch::kInt16))
-                        .to(device);        
-        
-        auto target_pi = torch::tensor(batch.target_probs, torch::dtype(torch::kInt16))
-                            .view({-1, N_MOVES})
-                            .to(device);
-
-        auto target_v = torch::tensor(batch.target_values, torch::dtype(torch::kFloat32))
-                            .to(device);
+        // x, graph, counts, target_visits, target_v
+        // should all be on the GPU from the replay buffer
+        // --------------------------------
 
         optimizer->zero_grad();
         auto output = train_model.forward({x, graph, counts}).toTuple();
@@ -85,7 +68,7 @@ public:
             value_pred, 
             target_pi, 
             target_v, 
-            counts // Must be on GPU
+            counts
         };
         
         torch::Tensor total_loss = loss_module.forward(loss_inputs).toTensor();
