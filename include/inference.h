@@ -56,15 +56,13 @@ public:
       throw std::runtime_error("pthread_cond_init(cond_write_ready) failed");
     }
 
-    auto cerr =
-        cudaHostRegister(arena, sizeof(SharedArena), cudaHostRegisterMapped);
+    auto cerr = cudaHostRegister(arena, sizeof(SharedArena), cudaHostRegisterMapped);
     if (cerr != cudaSuccess) [[unlikely]] {
       pthread_cond_destroy(&arena->cond_write_ready);
       pthread_cond_destroy(&arena->cond_read_ready);
       pthread_mutex_destroy(&arena->mutex);
       delete arena;
-      throw std::runtime_error(std::string("cudaHostRegister failed: ") +
-                               cudaGetErrorString(cerr));
+      throw std::runtime_error(std::string("cudaHostRegister failed: ") +  cudaGetErrorString(cerr));
     }
 
     d_crossing_counts = mapPinnedDevicePtr<int16_t>(arena->crossing_counts);
@@ -72,53 +70,41 @@ public:
     d_facial_lengths = mapPinnedDevicePtr<int16_t>(arena->facial_lengths);
     d_other_features = mapPinnedDevicePtr<int16_t>(arena->other_features);
 
-    d_output_tensor = mapPinnedDevicePtr<float>(arena->probs);
+    d_output_tensor = mapPinnedDevicePtr<float>(arena->logits);
     d_value_outputs = mapPinnedDevicePtr<float>(arena->values);
   }
 
   void run_inference(const torch::jit::script::Module &model) {
-    const int64_t total_rows = arena->cur_row.load(std::memory_order_acquire);
-    if (total_rows <= 0) {
+    const int64_t total_verts = arena->cur_vertex.load(std::memory_order_acquire);
+    const int64_t total_entries = arena->cur_entry.load(std::memory_order_acquire);
+    if (total_entries <= 0 || total_verts <= 0) {
       return;
     }
 
-    auto float_opts =
-        torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32);
-    auto int_opts =
-        torch::TensorOptions().device(torch::kCUDA).dtype(torch::kInt16);
+    auto float_opts = torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32);
+    auto int_opts = torch::TensorOptions().device(torch::kCUDA).dtype(torch::kInt16);
 
     // zero-copy views on mapped host memory (as device pointers)
 
-    auto counts_gpu_view =
-        torch::from_blob(d_crossing_counts, {BATCH_SIZE}, int_opts);
+    auto counts_gpu_view =  torch::from_blob(d_crossing_counts, {total_entries}, int_opts);
 
-    auto graph_gpu_view =
-        torch::from_blob(d_graph, {total_rows, GRAPH_DEGREE}, int_opts);
+    auto graph_gpu_view = torch::from_blob(d_graph, {total_verts, GRAPH_DEGREE}, int_opts);
 
-    auto other_features_gpu_view = torch::from_blob(
-        d_other_features, {total_rows, N_OTHER_FEATURES}, int_opts);
+    auto other_features_gpu_view = torch::from_blob(d_other_features, {total_verts, N_OTHER_FEATURES}, int_opts);
 
-    auto facial_lengths_gpu_view =
-        torch::from_blob(d_facial_lengths, {total_rows, N_FACES}, int_opts);
+    auto facial_lengths_gpu_view = torch::from_blob(d_facial_lengths, {total_verts, N_FACES}, int_opts);
 
     auto output_tuple =
-        model
-            .forward({facial_lengths_gpu_view, other_features_gpu_view,
-                      graph_gpu_view, counts_gpu_view})
-            .toTuple();
+        model.forward({facial_lengths_gpu_view, other_features_gpu_view, graph_gpu_view, counts_gpu_view}).toTuple();
 
-    torch::Tensor policy =
-        output_tuple->elements()[0].toTensor(); // [total_rows, N_MOVES]
-    torch::Tensor values =
-        output_tuple->elements()[1].toTensor(); // [BATCH_SIZE]
+    torch::Tensor policy = output_tuple->elements()[0].toTensor(); // [total_verts, N_MOVES]
+    torch::Tensor values = output_tuple->elements()[1].toTensor(); // [total_entries]
 
-    auto output_arena_view =
-        torch::from_blob(d_output_tensor, {total_rows, N_MOVES}, float_opts);
+    auto output_arena_view = torch::from_blob(d_output_tensor, {total_verts, N_MOVES}, float_opts);
 
     output_arena_view.copy_(policy);
 
-    auto value_arena_view =
-        torch::from_blob(d_value_outputs, {BATCH_SIZE}, float_opts);
+    auto value_arena_view = torch::from_blob(d_value_outputs, {total_entries}, float_opts);
     value_arena_view.copy_(values);
 
     cudaDeviceSynchronize();
@@ -126,3 +112,26 @@ public:
     arena->cur_row.store(0, std::memory_order_release);
   }
 };
+
+double Node::expand(InferenceServer &inference_server) {
+  if (is_expanded) {
+    std::cerr << "Node already expanded" << std::endl;
+    return 0.0;
+  }
+
+  is_expanded = true;
+
+  const auto [entry, first_vertex, is_full] = inference_server.arena.load(knot);
+
+  if (is_full) {
+    inference_server.run_inference();
+  }
+
+  for (auto m : knot.moves()) {
+    children.emplace_back(Child(this, m, 0.0));
+  }
+
+  // FIXME: WAIT
+
+  return inference_server.arena.unload(*this, entry, first_vertex);
+}

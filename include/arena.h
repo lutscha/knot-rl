@@ -7,6 +7,8 @@
 #include <cstdlib>
 #include <iostream>
 #include <pthread.h>
+#include <tuple>
+#include <algorithm>
 #include <utility>
 
 constexpr int64_t BATCH_SIZE = 16;
@@ -23,6 +25,9 @@ struct SharedArena {
   std::atomic<int64_t> cur_entry{0};
   std::atomic<int64_t> cur_vertex{0};
 
+  std::atomic<int64_t> entries_ready{0};
+  std::atomic<int64_t> entries_left{0};
+
   pthread_mutex_t mutex;
   pthread_cond_t cond_read_ready;
   pthread_cond_t cond_write_ready;
@@ -34,43 +39,53 @@ struct SharedArena {
   uint16_t other_features[TOTAL_CROSSINGS][N_OTHER_FEATURES];
 
   // outputs
-  float probs[TOTAL_CROSSINGS][N_MOVES];
+  float logits[TOTAL_CROSSINGS][N_MOVES];
   float values[BATCH_SIZE];
 
-  std::pair<int64_t, int64_t> load(const Knot &knot) {
+  std::tuple<int64_t, int64_t, bool> load(const Knot &knot) {
+
     int64_t entry = cur_entry.fetch_add(1, std::memory_order_acq_rel);
     int64_t first_vertex = cur_vertex.fetch_add(knot.n_crossings, std::memory_order_acq_rel);
 
-    if (entry >= BATCH_SIZE || first_vertex + knot.n_crossings > TOTAL_CROSSINGS) {
+    if (entry >= BATCH_SIZE ||  first_vertex + knot.n_crossings > TOTAL_CROSSINGS) {
       std::cerr << "Arena overflow" << std::endl;
       exit(1);
     }
 
     std::fill_n(&facial_lengths[first_vertex][0], knot.n_crossings * N_FACES, uint16_t{0});
 
-    knot.compute_facial_lengths(&facial_lengths[first_vertex]);
     crossing_counts[entry] = knot.n_crossings;
+    knot.compute_facial_lengths(&facial_lengths[first_vertex]);
     knot.to_graph(&graph[first_vertex]);
     for (int64_t v = 0; v < knot.n_crossings; v++) {
       other_features[first_vertex + v][SIGN_FEATURE_IDX] = static_cast<uint16_t>(knot.vertex_sign(v));
-      other_features[first_vertex + v][VISITS_UNTIL_SELF_IDX] = static_cast<uint16_t>(knot.visits_until_self(v));
+      other_features[first_vertex + v][VISITS_UNTIL_SELF_IDX] =  static_cast<uint16_t>(knot.visits_until_self(v));
     }
 
-    if (entry == BATCH_SIZE - 1) {
-      //WE HAVE TO DO SOMETHING HERE!!!
+    const auto result = std::make_tuple(entry, first_vertex, entry == BATCH_SIZE - 1);
+
+    const uint64_t entries_ready_ = entries_ready.fetch_add(1, std::memory_order_acq_rel);
+    if (entries_ready_ == BATCH_SIZE - 1) {
+      entries_left.store(BATCH_SIZE, std::memory_order_release);
+      pthread_cond_signal(&cond_read_ready);
     }
-    
-    return {entry, first_vertex};
+
+    return result;
   }
 
-  float unload(Node &node, int64_t first_vertex, int64_t entry) {
+  float unload(Node &node, int64_t entry, int64_t first_vertex) {
     double total_prob = 0.0;
 
     for (Child &child : node.children) {
       const uint16_t bit = Visit::MOVE_TO_BIT(child.move.move);
       const uint16_t v = child.move.v;
-      child.p = std::exp(probs[first_vertex + v][bit]);
+      child.p = std::exp(logits[first_vertex + v][bit]);
       total_prob += child.p;
+    }
+
+    if (total_prob == 0.0) {
+      std::cerr << "Total probability is 0.0" << std::endl;
+      exit(1);
     }
 
     const double inv = 1.0 / total_prob;
@@ -79,25 +94,16 @@ struct SharedArena {
       child.p *= inv;
     }
 
-    return values[entry];
+    const float result = values[entry];
+
+    const uint64_t entries_left_ = entries_left.fetch_add(-1, std::memory_order_acq_rel);
+    if (entries_left_ == 1) {
+      entries_ready.store(0, std::memory_order_release);
+      cur_entry.store(0, std::memory_order_release);
+      cur_vertex.store(0, std::memory_order_release);
+      pthread_cond_signal(&cond_write_ready);
+    }
+
+    return result;
   }
 };
-
-double Node::expand(SharedArena &arena) {
-  if (is_expanded) {
-    std::cerr << "Node already expanded" << std::endl;
-    return 0.0;
-  }
-
-  is_expanded = true;
-
-  const auto [entry, first_vertex] = arena.load(knot);
-
-  // FIXME: WAIT
-
-  for (auto m : knot.moves()) {
-    children.emplace_back(this, m, 0.0);
-  }
-
-  return arena.unload(*this, first_vertex, entry);
-}
