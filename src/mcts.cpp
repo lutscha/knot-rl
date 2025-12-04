@@ -3,6 +3,7 @@
 #include "../include/visit.h"
 #include "../include/arena.h"
 #include "../include/deserializer.h"
+#include "../include/inference.h"
 #include <vector>
 #include <cstdint>
 #include <cstddef>
@@ -17,12 +18,16 @@
 #include <filesystem>
 #include <atomic>
 
+
 namespace fs = std::filesystem;
 
 // Hardcoded base path based on your previous description
 const std::string KNOT_DATA_DIR = "knot_data/big_data";
 
-Link<static_n_components> load_next_knot() {
+static InferenceServer inference_server;
+
+
+Knot load_next_knot() {
     static std::atomic<int> current_index{0};
     
     int idx = current_index.fetch_add(1);
@@ -46,7 +51,7 @@ Link<static_n_components> load_next_knot() {
     file.seekg(0);
     file.read(&json_content[0], size);
 
-    return deserialize_link(json_content);
+    return deserialize_link<1>(json_content);
 }
 
 // static InferenceServer inference_server;
@@ -62,7 +67,7 @@ AvailableMove mcts_select_move(const Knot root_knot, std::size_t n_simulations) 
 
   // Expand root once at the start.
 
-  root.expand();
+  root.expand(*inference_server.arena);
 
   if (root.children.empty()) {
     // No moves available; return some dummy move.
@@ -100,7 +105,7 @@ AvailableMove mcts_select_move(const Knot root_knot, std::size_t n_simulations) 
     }
 
     // EXPANSION
-    const double value = cur->expand();
+    const double value = cur->expand(*inference_server.arena);
 
     // BACKPROPAGATION
     for (Node *n : path) {
