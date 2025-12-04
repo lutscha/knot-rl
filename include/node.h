@@ -1,3 +1,5 @@
+#pragma once
+
 #include "../include/knot.h"
 #include "../include/visit.h"
 #include <cmath>
