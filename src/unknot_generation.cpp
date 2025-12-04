@@ -8,9 +8,11 @@
 
 std::mt19937_64 rng = std::mt19937_64(std::random_device()());
 
-Knot random_unknot(Knot start, uint16_t target_n_crossings, std::size_t max_steps) {
+Knot random_unknot(Knot start, uint16_t target_n_crossings,
+                   std::size_t max_steps) {
   if (start.n_crossings > target_n_crossings) {
-    throw std::runtime_error("random_unknot: start must have fewer crossings than target");
+    throw std::runtime_error(
+        "random_unknot: start must have fewer crossings than target");
   }
 
   Knot buf[2] = {start, start}; // second buffer
@@ -18,13 +20,14 @@ Knot random_unknot(Knot start, uint16_t target_n_crossings, std::size_t max_step
   for (; step < max_steps; ++step) {
     uint16_t cur_idx = step & 1;
 
-    if( buf[cur_idx].n_crossings == target_n_crossings) {
+    if (buf[cur_idx].n_crossings == target_n_crossings) {
       return buf[cur_idx];
     }
 
     Knot &cur = buf[cur_idx];
     // Special case: the empty unknot. The only meaningful move is R1+ at v = 0.
-    ReidemeisterMove chosen_move = ReidemeisterMove::R1_pos(Orientation::pos, VisitType::over);
+    ReidemeisterMove chosen_move =
+        ReidemeisterMove::R1_pos(Orientation::pos, VisitType::over);
 
     if (cur.n_crossings == 0) {
       buf[cur_idx ^ 1] = cur.apply_move(0, chosen_move);
@@ -59,7 +62,7 @@ Knot random_unknot(Knot start, uint16_t target_n_crossings, std::size_t max_step
         continue;
       }
       if (ones == idx) {
-        chosen_move = Visit::GET_DIRECT_MOVE(bit);
+        chosen_move = Visit::BIT_TO_MOVE(bit);
         break;
       }
       ++ones;

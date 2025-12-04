@@ -784,7 +784,8 @@ public: // constructors
 
   uint16_t visits_until_self(uint16_t v) const noexcept {
     const uint16_t a = over_visit_index(v);
-    return visits[a].visits_until_self();
+    const uint16_t comp_size = n_conn_visits(get_comp(a).first);
+    return visits_until_self(visits[a], comp_size);
   }
 
   uint64_t hash() const noexcept {
