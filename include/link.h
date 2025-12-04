@@ -504,7 +504,7 @@ public: // constructors
 
     dec_comp(a0);
 
-    KNOT_PRAGMA_IVDEP
+    //KNOT_PRAGMA_IVDEP
     if (!wrapping) {
       for (uint16_t i = 0; i < a0; i++)
         visits[i] = deloop(i);
@@ -544,7 +544,7 @@ public: // constructors
 
     inc_comp(a);
 
-    KNOT_PRAGMA_IVDEP
+    //KNOT_PRAGMA_IVDEP
     for (uint16_t i = 0; i < a; i++)
       visits[i] = loop(i);
 
@@ -585,7 +585,7 @@ public: // constructors
 
     std::sort(excluded, excluded + 4);
 
-    KNOT_PRAGMA_IVDEP
+    //KNOT_PRAGMA_IVDEP
     uint16_t shift = 0;
     for (uint16_t i = 0; i < 2 * link.n_crossings; i++) {
       if (shift < 4 && i == excluded[shift]) [[unlikely]] {
@@ -613,7 +613,7 @@ public: // constructors
 
     inc_comps(std::min(a, b), std::max(a, b) - 2);
 
-    KNOT_PRAGMA_IVDEP
+    //KNOT_PRAGMA_IVDEP
 
     for (uint16_t i = 0; i < min_; i++)
       visits[i] = poke(i);
@@ -693,7 +693,7 @@ public: // constructors
 
     inc_comps(min_ - 1, max_ - 3); // double check the formula for links
 
-    KNOT_PRAGMA_IVDEP
+    //KNOT_PRAGMA_IVDEP
 
     for (uint16_t i = 0; i < min_; i++)
       visits[i] = poke_visit(i);
