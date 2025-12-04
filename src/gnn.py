@@ -425,14 +425,15 @@ class AlphaKnotLoss(torch.nn.Module):
         """
         logits: (N_total, 10) - Raw scores from policy head
         values: (B,) - Value head predictions
-        target_probs: (N_total, 10) - MCTS probabilities
+        target_probs: (N_total, 10) - MCTS visit counts
         target_vals: (B,) - Game results
         batch_counts: (B,) - Number of nodes per graph in the batch
         """
         
-        loss_val = torch.mse_loss(values, target_vals)
+        loss_val = nn.functional.mse_loss(values, target_vals)
 
         batch_counts = batch_counts.long()
+        target_vals = target_vals.long()
 
         # create batch indices: [0, 0, 0, 1, 1, 2, 2, 2...]
         batch_indices = torch.repeat_interleave(
@@ -440,14 +441,16 @@ class AlphaKnotLoss(torch.nn.Module):
             batch_counts.long()
         )
 
+        # get sum of visits per per example in batch
+        probs_sum = target_probs.sum(dim=1)
+        batch_visit_counts = torch.zeros(len(batch_counts), dtype=torch.double)
+        batch_visit_counts.index_add_(0, batch_indices, probs_sum)
+
         linear_term_nodes = (target_probs * logits).sum(dim=1)
         
-        # Sum linear terms per graphg
+        # sum linear terms per graph
         linear_term_graph = torch.zeros(len(batch_counts), device=logits.device)
         linear_term_graph.index_add_(0, batch_indices, linear_term_nodes)
-
-        # C. Term 2: Log Normalization (log Z)
-        # Z = Sum( exp(L) ) over all nodes and moves in the graph
 
         exp_logits_nodes = torch.exp(logits).sum(dim=1)
         z_graph = torch.zeros(len(batch_counts), device=logits.device)
@@ -456,6 +459,8 @@ class AlphaKnotLoss(torch.nn.Module):
         log_z_graph = torch.log(z_graph + 1e-9)
 
         loss_policy_graph = log_z_graph - linear_term_graph
+        loss_policy_graph = loss_policy_graph / (batch_visit_counts + 1e-9)
+
         loss_policy = loss_policy_graph.mean()
 
         return loss_val + loss_policy

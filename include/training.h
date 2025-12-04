@@ -67,8 +67,7 @@ public:
         auto counts = torch::tensor(batch.crossing_counts, torch::dtype(torch::kInt16))
                         .to(device);        
         
-        // targets are floats (??? how will compute loss be implemented, maybe visits can be ints?)
-        auto target_pi = torch::tensor(batch.target_probs, torch::dtype(torch::kFloat32))
+        auto target_pi = torch::tensor(batch.target_probs, torch::dtype(torch::kInt16))
                             .view({-1, N_MOVES})
                             .to(device);
 
