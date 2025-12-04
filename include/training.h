@@ -66,8 +66,8 @@ public:
         auto loss_inputs = std::vector<torch::jit::IValue>{
             logits, 
             value_pred, 
-            target_pi, 
-            target_v, 
+            target_visits, 
+            target_v,
             counts
         };
         

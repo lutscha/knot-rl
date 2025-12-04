@@ -1,6 +1,8 @@
 #include "../include/knot.h"
 #include "../include/node.h"
 #include "../include/visit.h"
+#include "../include/arena.h"
+#include "../include/deserializer.h"
 #include <vector>
 #include <cstdint>
 #include <cstddef>
@@ -9,12 +11,47 @@
 #include <limits>
 #include <memory>
 #include <chrono>
-#include "../include/arena.h"
+#include <fstream>
+#include <string>
+#include <random>
+#include <filesystem>
+#include <atomic>
+
+namespace fs = std::filesystem;
+
+// Hardcoded base path based on your previous description
+const std::string KNOT_DATA_DIR = "knot_data/big_data";
+
+Link<static_n_components> load_next_knot() {
+    static std::atomic<int> current_index{0};
+    
+    int idx = current_index.fetch_add(1);
+
+    if (idx >= 5000) {
+        std::cout << "Reached limit of 5000 knots. Stopping program." << std::endl;
+        std::exit(0);
+    }
+
+    fs::path full_path = fs::path(KNOT_DATA_DIR) / ("knot" + std::to_string(idx) + ".json");
+    std::ifstream file(full_path, std::ios::in | std::ios::binary | std::ios::ate);
+
+    if (!file) {
+        std::cerr << "Fatal Error: Could not open " << full_path << std::endl;
+        std::exit(1);
+    }
+
+    auto size = file.tellg();
+    std::string json_content(size, '\0'); 
+
+    file.seekg(0);
+    file.read(&json_content[0], size);
+
+    return deserialize_link(json_content);
+}
 
 // static InferenceServer inference_server;
 
 constexpr uint16_t TO_RESERVE = 256;
-
 
 static float** get_probs(const Knot &knot){
   return nullptr;

@@ -227,7 +227,7 @@ def visit_flags(v) -> int:
     return (sign_bit << SIGN_SHIFT) | (type_bit << TYPE_SHIFT)
 
 def serialize_link(link, n_strands, n_crossings) -> str:
-    # 1. Generate the fully expanded JSON string first
+    
     json_str = json.dumps(
         {
             "n_strands": n_strands,
@@ -243,9 +243,9 @@ def serialize_link(link, n_strands, n_crossings) -> str:
         indent=2,
     )
     
-    # Logic: Find '[' followed by whitespace/newlines, a number, comma, 
+    # regex logic: Find '[' followed by whitespace/newlines, a number, comma, 
     # whitespace/newlines, a number, whitespace/newlines, and ']'
-    # Replace with: '[number, number]'
+    # replace it with: '[number, number]'
     return re.sub(
         r'\[\s+(\d+),\s+(\d+)\s+\]', 
         r'[\1, \2]', 
@@ -262,9 +262,14 @@ if __name__ == "__main__":
     args = parser.parse_args()
     path, knots, max_strands, max_crossings = args.path, args.knots, args.max_strands, args.max_crossings
 
-    for n_strands in range(3, max_strands):
-        for i in range(knots):
-            n_crossings = random.randint(20, max_crossings)
-            link = random_knot(n_strands, n_crossings)
-            with open(path+f"knot{n_strands}_{i}.json", "w") as f:
-                f.write(serialize_link(link, n_strands=n_strands, n_crossings=n_crossings))
+    i = 0
+
+    for n_crossings in range(10, max_crossings):
+        for n_strands in range(3, max_strands):
+            for _ in range(knots):
+                link = random_knot(n_strands, n_crossings)
+                with open(path+f"knot{i}.json", "w") as f:
+                    f.write(serialize_link(link, n_strands=n_strands, n_crossings=n_crossings))
+                i+=1
+
+    print(f"Total knots saved = {i}.")

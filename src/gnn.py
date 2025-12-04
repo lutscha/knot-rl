@@ -2,6 +2,7 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 import math
+import argparse
 from typing import Tuple, Optional
 
 def mean_pool_index_add(x: torch.Tensor, batch_sizes: torch.Tensor) -> torch.Tensor:
@@ -378,13 +379,15 @@ class AlphaKnot(nn.Module):
             nn.Linear(self.policy_dim, moves)
         )
 
-    def forward(self, x, neighbor_index, batch_sizes) -> Tuple[torch.Tensor, torch.Tensor]:
+    def forward(self, facial_lengths, other, neighbor_index, batch_sizes) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Forward pass for a batch of disjoint graphs.
 
         Args:
-            x (torch.Tensor): Initial (N,6) embedding of the batch.
-                Shape: (N_total, 6)
+            facial_lengths (torch.Tensor): Initial (N,4) embedding of the lengths of each face.
+                Shape: (N_total, 4)
+            other (torch.Tensor): Initial (N,2) embedding of the other features.
+                Shape: (N_total, 2)
             neighbor_index (torch.Tensor): Neighbor index tensor.
                 Shape: (N_total, 4)
             batch_sizes (torch.Tensor): A 1D tensor containing the size of each 
@@ -398,6 +401,9 @@ class AlphaKnot(nn.Module):
                 - values: Graph-level value estimates.
                     Shape: (batch_size,)
         """
+
+        x = torch.cat([facial_lengths, other], dim = 1)
+
         x = x.float()
 
         neighbor_index = neighbor_index.long()
@@ -463,3 +469,73 @@ class AlphaKnotLoss(torch.nn.Module):
 
         loss_policy = loss_policy_graph.mean()
         return loss_val + loss_policy
+    
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    # Architecture Arguments
+    parser.add_argument("--model_dim", type=int, default=128, help="Dimension of node embeddings")
+    parser.add_argument("--d_k", type=int, default=64, help="Dimension of attention keys/queries")
+    parser.add_argument("--heads", type=int, default=4, help="Number of attention heads")
+    parser.add_argument("--layers", type=int, default=4, dest="transformer_layers", help="Number of Transformer layers")
+    parser.add_argument("--moves", type=int, default=10, help="Size of action space (output logits)")
+    parser.add_argument("--attention", type=str, default="base", choices=["base", "invariant"], 
+                        help="Type of attention mechanism (base vs invariant)")
+    parser.add_argument("--d_ff", type=int, default=None, help="Feed-forward dimension (defaults to 4*model_dim)")
+    parser.add_argument("--value_dim", type=int, default=None, help="Value head hidden dim")
+    parser.add_argument("--policy_dim", type=int, default=None, help="Policy head hidden dim")
+
+    # Output Paths
+    parser.add_argument("--out_inference", type=str, default="inference_model.pt", help="Path for inference model")
+    parser.add_argument("--out_train", type=str, default="train_model.pt", help="Path for training model")
+    parser.add_argument("--out_loss", type=str, default="loss_module.pt", help="Path for loss module")
+
+    args = parser.parse_args()
+    
+    print(f"--- Configuration ---")
+    print(f"Model Dim: {args.model_dim}")
+    print(f"Heads: {args.heads}")
+    print(f"Layers: {args.transformer_layers}")
+    print(f"Attention: {args.attention}")
+    print("---------------------")
+
+    print("--- Exporting AlphaKnot Model ---")
+    
+    model = AlphaKnot(
+        model_dim=args.model_dim,
+        d_k=args.d_k,
+        heads=args.heads,
+        attention=args.attention,
+        transformer_layers=args.transformer_layers,
+        moves=args.moves,
+        d_ff=args.d_ff,
+        value_dim=args.value_dim,
+        policy_dim=args.policy_dim
+    )
+    model.eval()
+
+    try:
+        # Scripting captures the control flow and types
+        scripted_model = torch.jit.script(model)
+
+        scripted_model.save(args.out_inference)
+        print(f"Success: Saved '{args.out_inference}'")
+
+        scripted_model.save(args.out_train)
+        print(f"Success: Saved '{args.out_train}'")
+        
+    except Exception as e:
+        print(f"Failed to script AlphaKnot: {e}")
+        exit(1)
+
+    print("--- Exporting Loss Module ---")
+    
+    loss_module = AlphaKnotLoss()
+    
+    try:
+        scripted_loss = torch.jit.script(loss_module)
+        scripted_loss.save(args.out_loss)
+        print(f"Success: Saved '{args.out_loss}'")
+        
+    except Exception as e:
+        print(f"Failed to script Loss Module: {e}")
+        exit(1)
