@@ -398,9 +398,16 @@ class AlphaKnot(nn.Module):
                 - values: Graph-level value estimates.
                     Shape: (batch_size,)
         """
+        x = x.float()
+
+        neighbor_index = neighbor_index.long()
+        batch_sizes = batch_sizes.long()
 
         x = self.linear(x)
-        neighbor_index += torch.repeat_interleave(batch_sizes, batch_sizes).unsqueeze(-1)
+
+        offsets = torch.cat([torch.tensor([0], device=x.device), batch_sizes.cumsum(0)[:-1]])
+        neighbor_offsets = torch.repeat_interleave(offsets, batch_sizes).unsqueeze(-1)
+        neighbor_index = neighbor_index + neighbor_offsets
 
         for layer in self.transformer_pass:
             x = layer(x, neighbor_index)
@@ -413,3 +420,47 @@ class AlphaKnot(nn.Module):
 
         return logits, values
 
+class AlphaKnotLoss(torch.nn.Module):
+    def forward(self, logits, values, target_probs, target_vals, batch_counts):
+        """
+        logits: (N_total, 10) - Raw scores from policy head
+        values: (B,) - Value head predictions
+        target_probs: (N_total, 10) - MCTS visit counts
+        target_vals: (B,) - Game results
+        batch_counts: (B,) - Number of nodes per graph in the batch
+        """
+        
+        loss_val = nn.functional.mse_loss(values, target_vals)
+
+        batch_counts = batch_counts.long()
+        target_vals = target_vals.long()
+
+        # create batch indices: [0, 0, 0, 1, 1, 2, 2, 2...]
+        batch_indices = torch.repeat_interleave(
+            torch.arange(len(batch_counts), device=logits.device), 
+            batch_counts.long()
+        )
+
+        # get sum of visits per per example in batch
+        probs_sum = target_probs.sum(dim=1)
+        batch_visit_counts = torch.zeros(len(batch_counts), dtype=torch.double)
+        batch_visit_counts.index_add_(0, batch_indices, probs_sum)
+
+        linear_term_nodes = (target_probs * logits).sum(dim=1)
+        
+        # sum linear terms per graph
+        linear_term_graph = torch.zeros(len(batch_counts), device=logits.device)
+        linear_term_graph.index_add_(0, batch_indices, linear_term_nodes)
+
+        exp_logits_nodes = torch.exp(logits).sum(dim=1)
+        z_graph = torch.zeros(len(batch_counts), device=logits.device)
+        z_graph.index_add_(0, batch_indices, exp_logits_nodes)
+        
+        log_z_graph = torch.log(z_graph + 1e-9)
+
+        loss_policy_graph = log_z_graph - linear_term_graph
+        loss_policy_graph = loss_policy_graph / (batch_visit_counts + 1e-9)
+
+        loss_policy = loss_policy_graph.mean()
+
+        return loss_val + loss_policy
