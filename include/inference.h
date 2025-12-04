@@ -75,8 +75,11 @@ public:
   }
 
   void run_inference(const torch::jit::script::Module &model) {
-    const int64_t total_verts = arena->cur_vertex.load(std::memory_order_acquire);
-    const int64_t total_entries = arena->cur_entry.load(std::memory_order_acquire);
+    pthread_mutex_lock(&arena->mutex);
+    const int64_t total_verts = arena->cur_vertex;
+    const int64_t total_entries = arena->cur_entry;
+    pthread_mutex_unlock(&arena->mutex);
+    
     if (total_entries <= 0 || total_verts <= 0) {
       return;
     }
@@ -94,8 +97,7 @@ public:
 
     auto facial_lengths_gpu_view = torch::from_blob(d_facial_lengths, {total_verts, N_FACES}, int_opts);
 
-    auto output_tuple =
-        model.forward({facial_lengths_gpu_view, other_features_gpu_view, graph_gpu_view, counts_gpu_view}).toTuple();
+    auto output_tuple = model.forward({facial_lengths_gpu_view, other_features_gpu_view, graph_gpu_view, counts_gpu_view})  .toTuple();
 
     torch::Tensor policy = output_tuple->elements()[0].toTensor(); // [total_verts, N_MOVES]
     torch::Tensor values = output_tuple->elements()[1].toTensor(); // [total_entries]
@@ -109,7 +111,10 @@ public:
 
     cudaDeviceSynchronize();
 
-    arena->cur_row.store(0, std::memory_order_release);
+    pthread_mutex_lock(&arena->mutex);
+    arena->entries_left = total_entries; // NOT blindly BATCH_SIZE
+    pthread_cond_broadcast(&arena->cond_read_ready);
+    pthread_mutex_unlock(&arena->mutex);
   }
 };
 
@@ -121,17 +126,11 @@ double Node::expand(InferenceServer &inference_server) {
 
   is_expanded = true;
 
-  const auto [entry, first_vertex, is_full] = inference_server.arena.load(knot);
-
-  if (is_full) {
-    inference_server.run_inference();
-  }
+  const auto [entry, first_vertex] = inference_server.arena.load(knot);
 
   for (auto m : knot.moves()) {
     children.emplace_back(Child(this, m, 0.0));
   }
-
-  // FIXME: WAIT
 
   return inference_server.arena.unload(*this, entry, first_vertex);
 }
