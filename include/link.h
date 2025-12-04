@@ -777,15 +777,15 @@ public: // constructors
     return n_crossings;
   }
 
-  uint16_t visits_until_mate(uint16_t a, uint16_t comp_size) const noexcept {
+  uint16_t visits_until_mate(const uint16_t a, const uint16_t comp_size) const noexcept {
     uint16_t b = mate(a);
     return b >= a ? (b - a + 1) / 2 : (comp_size + b - a + 1) / 2;
   }
 
-  uint16_t visits_until_self(uint16_t v) const noexcept {
+  uint16_t visits_until_self(const uint16_t v) const noexcept {
     const uint16_t a = over_visit_index(v);
     const uint16_t comp_size = n_conn_visits(get_comp(a).first);
-    return visits_until_self(visits[a], comp_size);
+    return visits_until_mate(visits[a], comp_size);
   }
 
   uint64_t hash() const noexcept {

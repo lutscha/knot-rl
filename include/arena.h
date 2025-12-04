@@ -1,3 +1,5 @@
+#pragma once
+
 #include "knot.h"
 #include "node.h"
 #include "visit.h"
@@ -102,7 +104,6 @@ struct SharedArena {
 
     pthread_mutex_lock(&mutex);
     if (--entries_left == 0) {
-      entries_ready = 0;
       cur_entry = 0;
       cur_vertex = 0;
       pthread_cond_signal(&cond_write_ready);
