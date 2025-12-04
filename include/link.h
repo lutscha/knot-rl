@@ -23,12 +23,6 @@
 
 using Vertex = uint16_t[4];
 
-struct FacialLengths {
-  uint16_t len[2][2];
-
-  FacialLengths() : len{{0, 0}, {0, 0}} {}
-};
-
 struct Dart {
   uint16_t a;
   Direction dir;
@@ -906,14 +900,19 @@ public: // constructors
     return Dart(b, dir_b);
   }
 
-  void compute_facial_length(FacialLengths *out) const noexcept {
+  uint16_t get_facial_index(VisitType type, Direction dir) const noexcept {
+    return static_cast<size_t>(type) * 2 + static_cast<size_t>(dir);
+  }
+
+  void compute_facial_lengths(Vertex *out) const noexcept {
     Dart visited[MAX_CROSSINGS]{};
+
     for (uint16_t a = 0; a < 2 * n_crossings; a++) {
       const uint16_t v_a = vertex_index(a);
       const VisitType type_a = Visit::GET_TYPE(flags(a));
       for (Direction dir : {Direction::next, Direction::prev}) {
-        if (out[v_a].len[static_cast<size_t>(type_a)]
-                        [static_cast<size_t>(dir)] != 0) {
+        const uint16_t idx = get_facial_index(type_a, dir);
+        if (out[v_a][idx] != 0) {
           continue;
         }
         Dart dart = Dart(a, dir);
@@ -934,8 +933,8 @@ public: // constructors
           const Dart &dart = visited[i];
           const uint16_t v = vertex_index(dart.a);
           const VisitType type = Visit::GET_TYPE(flags(dart.a));
-          out[v].len[static_cast<size_t>(type)][static_cast<size_t>(dart.dir)] =
-              length;
+          const uint16_t idx = get_facial_index(type, dart.dir);
+          out[v][idx] = length;
         }
       }
     }
