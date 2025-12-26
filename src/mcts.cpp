@@ -83,12 +83,6 @@ AvailableMove mcts_select_move(const Knot root_knot, std::size_t n_simulations) 
 
     // SELECTION
     while (cur->is_expanded && !cur->children.empty()) {
-      // for (auto &child : cur->children) {
-      //   if (!child.is_computed) {
-      //     child.compute();
-      //   }
-      // }
-
       Child *child = cur->select_best_child();
       if (!child) {
         break;

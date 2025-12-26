@@ -5,10 +5,10 @@
 #include <fstream>
 #include <iostream>
 
+#include "../include/basic_knots.h"
 #include "../include/deserializer.h"
 #include "../include/knot.h"
-#include "../include/basic_knots.h"
-#include "../src/unknot_generation.cpp"
+// #include "../src/mcts.cpp"
 
 using Clock = std::chrono::steady_clock;
 
@@ -83,7 +83,7 @@ void test() {
 
 Knot amirs_knot() {
   static constexpr uint16_t n_crossings = 4;
-  static uint16_t comp[1] = {2 *n_crossings};
+  static uint16_t comp[1] = {2 * n_crossings};
   static Visit visits[2 * n_crossings] = {
       Visit(3, Orientation::neg, VisitType::over),
       Visit(6, Orientation::pos, VisitType::under),
@@ -98,7 +98,7 @@ Knot amirs_knot() {
 
 Knot culprit_unknot() {
   static constexpr uint16_t n_crossings = 10;
-  static uint16_t comp[1] = {2 *n_crossings};
+  static uint16_t comp[1] = {2 * n_crossings};
   static Visit visits[2 * n_crossings] = {
       Visit(13, Orientation::neg, VisitType::under),
       Visit(4, Orientation::pos, VisitType::over),
@@ -125,7 +125,7 @@ Knot culprit_unknot() {
 
 Knot culprit_light() {
   static constexpr uint16_t n_crossings = 12;
-  static uint16_t comp[1] = {2 *  n_crossings};
+  static uint16_t comp[1] = {2 * n_crossings};
   static Visit visits[2 * n_crossings] = {
       Visit(15, Orientation::neg, VisitType::under),
       Visit(6, Orientation::pos, VisitType::over),
@@ -168,7 +168,7 @@ void culprit() {
   for (size_t i = 0; i < culprit_undone.knots.size(); i++) {
     culprit_undone.knots[i].print_dowker();
     std::cout << culprit_undone.path[i].move << std::endl;
-    //culprit_undone.knots[i].print_state();
+    // culprit_undone.knots[i].print_state();
   }
 }
 
@@ -185,14 +185,17 @@ Link<static_n_components> deserialize(std::string filename) {
   }
 }
 
-
-
 int main() {
-  Knot knot = deserialize<1>("knot_data/dumb_knot.json");
+
+  Knot knot = deserialize<1>("knot_data/ugly_knot.json");
+
   knot.print_state();
+
   knot.print_dowker(", ");
 
-  GreedyResult result = greedy_minimize_crossings(knot, 5000, 5);
+  GreedyResult result = greedy_minimize_crossings(knot, 3000, 10);
+
   result.best.print_dowker(", ");
+
   return 0;
 }

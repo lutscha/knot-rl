@@ -9,9 +9,27 @@
 #include <stdexcept>
 #include <string>
 
-#include <cuda_runtime.h>
 #include <torch/torch.h>
 #include "arena.h" // Imports constants: GRAPH_DEGREE, N_FACES, N_MOVES, etc.
+
+#ifdef USE_CUDA
+#include <cuda_runtime.h>
+#else
+#include <cstddef>
+using cudaError_t = int;
+static constexpr cudaError_t cudaSuccess = 0;
+static constexpr unsigned int cudaHostRegisterMapped = 0;
+inline const char *cudaGetErrorString(cudaError_t) { return "CUDA disabled"; }
+inline cudaError_t cudaHostRegister(void *, std::size_t, unsigned int) {
+  return cudaSuccess;
+}
+inline cudaError_t cudaHostUnregister(void *) { return cudaSuccess; }
+inline cudaError_t cudaHostGetDevicePointer(void **device_ptr, void *host_ptr,
+                                            unsigned int) {
+  *device_ptr = host_ptr;
+  return cudaSuccess;
+}
+#endif
 
 constexpr size_t REPLAY_CAPACITY = 100000;       // Max games in cold storage
 constexpr size_t TRAIN_BATCH_SIZE = 512;         // Games per training batch

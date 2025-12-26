@@ -3,13 +3,14 @@
 #include "knot.h"
 #include "node.h"
 #include "visit.h"
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
-#include <iostream>
+#include <stdexcept>
+#include <limits>
 #include <pthread.h>
 #include <tuple>
-#include <algorithm>
 
 constexpr int64_t BATCH_SIZE = 16;
 constexpr int64_t TOTAL_CROSSINGS = MAX_CROSSINGS * BATCH_SIZE;
@@ -53,9 +54,8 @@ struct SharedArena {
     cur_vertex += knot.n_crossings;
     pthread_mutex_unlock(&mutex);
 
-    if (entry >= BATCH_SIZE || first_vertex + knot.n_crossings > TOTAL_CROSSINGS) {
-        std::cerr << "Arena overflow" << std::endl;
-        exit(1);
+    if (entry >= BATCH_SIZE || first_vertex + knot.n_crossings > TOTAL_CROSSINGS) [[unlikely]] {
+        throw std::runtime_error("Arena overflow");
     }
 
     std::fill_n(&facial_lengths[first_vertex][0], knot.n_crossings * N_FACES,uint16_t{0});
@@ -64,6 +64,7 @@ struct SharedArena {
     knot.compute_facial_lengths(&facial_lengths[first_vertex]);
     knot.to_graph(&graph[first_vertex]);
     for (int64_t v = 0; v < knot.n_crossings; v++) {
+        static_assert(N_OTHER_FEATURES == 2, "N_OTHER_FEATURES must be 2");
         other_features[first_vertex + v][SIGN_FEATURE_IDX] = static_cast<uint16_t>(knot.vertex_sign(v));
         other_features[first_vertex + v][VISITS_UNTIL_SELF_IDX] = static_cast<uint16_t>(knot.visits_until_self(v));
     }
@@ -80,22 +81,26 @@ struct SharedArena {
     }
     pthread_mutex_unlock(&mutex);
 
-    double total_prob = 0.0;
+    if (node.children.empty()) [[unlikely]] {
+      throw std::runtime_error("Node has no children");
+    }
 
+    double total_prob = 0.0;
+    double max_logit = -std::numeric_limits<double>::infinity();
     for (Child &child : node.children) {
       const uint16_t bit = Visit::MOVE_TO_BIT(child.move.move);
       const uint16_t v = child.move.v;
-      child.p = std::exp(logits[first_vertex + v][bit]);
+      child.p = logits[first_vertex + v][bit];
+      max_logit = std::max(max_logit, child.p);
+    }
+    for (Child &child : node.children) {
+      child.p = std::exp(child.p - max_logit);
       total_prob += child.p;
     }
-
-    if (total_prob == 0.0) {
-      std::cerr << "Total probability is 0.0" << std::endl;
-      exit(1);
+    if (total_prob == 0.0) [[unlikely]] {
+      throw std::runtime_error("Total probability is 0.0");
     }
-
     const double inv = 1.0 / total_prob;
-
     for (Child &child : node.children) {
       child.p *= inv;
     }

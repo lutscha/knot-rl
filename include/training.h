@@ -17,13 +17,17 @@ class Trainer {
     float learning_rate = 1e-3;
     float weight_decay = 1e-4;
 
-    torch::Device device = torch::kCUDA;
+#ifdef USE_CUDA
+    static constexpr torch::DeviceType device = torch::kCUDA;
+#else
+    static constexpr torch::DeviceType device = torch::kCPU;
+#endif
     
 public:
     Trainer(std::string model_path, InferenceServer* srv) : server(srv) {
         try {
             train_model = torch::jit::load(model_path);
-            train_model.to(torch::kCUDA);
+            train_model.to(device);
             train_model.train();
         } catch (const c10::Error& e) {
             std::cerr << "Error loading training model: " << e.msg() << std::endl;
@@ -32,7 +36,7 @@ public:
 
         try {
             loss_module = torch::jit::load("loss_module.pt");
-            loss_module.to(torch::kCUDA);
+            loss_module.to(device);
         } catch (const c10::Error& e) {
             std::cerr << "Error loading loss module: " << e.msg() << std::endl;
             exit(1);

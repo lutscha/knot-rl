@@ -253,23 +253,27 @@ def serialize_link(link, n_strands, n_crossings) -> str:
     )
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--path", default='')
-    parser.add_argument("--knots", default=10, type=int)
-    parser.add_argument("--max_strands", default=20, type=int)
-    parser.add_argument("--max_crossings", default=200, type=int)
+    # parser = argparse.ArgumentParser()
+    # parser.add_argument("--path", default='')
+    # parser.add_argument("--knots", default=10, type=int)
+    # parser.add_argument("--max_strands", default=20, type=int)
+    # parser.add_argument("--max_crossings", default=200, type=int)
 
-    args = parser.parse_args()
-    path, knots, max_strands, max_crossings = args.path, args.knots, args.max_strands, args.max_crossings
+    # args = parser.parse_args()
+    # path, knots, max_strands, max_crossings = args.path, args.knots, args.max_strands, args.max_crossings
 
-    i = 0
+    # i = 0
 
-    for n_crossings in range(10, max_crossings):
-        for n_strands in range(3, max_strands):
-            for _ in range(knots):
-                link = random_knot(n_strands, n_crossings)
-                with open(path+f"knot{i}.json", "w") as f:
-                    f.write(serialize_link(link, n_strands=n_strands, n_crossings=n_crossings))
-                i+=1
+    # for n_crossings in range(10, max_crossings):
+    #     for n_strands in range(3, max_strands):
+    #         for _ in range(knots):
+    #             link = random_knot(n_strands, n_crossings)
+    #             with open(path+f"knot{i}.json", "w") as f:
+    #                 f.write(serialize_link(link, n_strands=n_strands, n_crossings=n_crossings))
+    #             i+=1
 
-    print(f"Total knots saved = {i}.")
+    # print(f"Total knots saved = {i}.")
+
+    knot = random_knot(3, 1000)
+    with open(f"knot_data/ugly_knot.json", "w") as f:
+        f.write(serialize_link(knot, n_strands=3, n_crossings=1000))

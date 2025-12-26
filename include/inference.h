@@ -1,6 +1,6 @@
 #pragma once
 
-#include <atomic>
+#include <iostream>
 #include <cstdint>
 #include <functional>
 #include <pthread.h>
@@ -8,9 +8,25 @@
 #include <string>
 
 #include "arena.h"
-#include <cuda_runtime.h>
+#include "c10/core/DeviceType.h"
 #include <torch/script.h>
 #include <torch/torch.h>
+
+#ifdef USE_CUDA
+#include <cuda_runtime.h>
+inline constexpr torch::DeviceType kInferDevice = torch::kCUDA;
+#else
+using cudaError_t = int;
+static constexpr cudaError_t cudaSuccess = 0;
+static constexpr unsigned int cudaHostRegisterMapped = 0;
+inline const char *cudaGetErrorString(cudaError_t) { return "CUDA disabled"; }
+inline cudaError_t cudaHostRegister(void *, std::size_t, unsigned int) {return cudaSuccess;}
+inline cudaError_t cudaHostGetDevicePointer(void **device_ptr, void *host_ptr, unsigned int) {
+  *device_ptr = host_ptr;
+  return cudaSuccess;
+}
+inline constexpr torch::DeviceType kInferDevice = torch::kCPU;
+#endif
 
 class InferenceServer {
 public:
@@ -56,13 +72,15 @@ public:
       throw std::runtime_error("pthread_cond_init(cond_write_ready) failed");
     }
 
-    auto cerr = cudaHostRegister(arena, sizeof(SharedArena), cudaHostRegisterMapped);
+    auto cerr =
+        cudaHostRegister(arena, sizeof(SharedArena), cudaHostRegisterMapped);
     if (cerr != cudaSuccess) [[unlikely]] {
       pthread_cond_destroy(&arena->cond_write_ready);
       pthread_cond_destroy(&arena->cond_read_ready);
       pthread_mutex_destroy(&arena->mutex);
       delete arena;
-      throw std::runtime_error(std::string("cudaHostRegister failed: ") +  cudaGetErrorString(cerr));
+      throw std::runtime_error(std::string("cudaHostRegister failed: ") +
+                               cudaGetErrorString(cerr));
     }
 
     d_crossing_counts = mapPinnedDevicePtr<int16_t>(arena->crossing_counts);
@@ -74,27 +92,26 @@ public:
     d_value_outputs = mapPinnedDevicePtr<float>(arena->values);
   }
 
-  void run_inference(const torch::jit::script::Module &model) {
+  void run_inference(torch::jit::script::Module &model) {
     pthread_mutex_lock(&arena->mutex);
     const int64_t total_verts = arena->cur_vertex;
     const int64_t total_entries = arena->cur_entry;
     pthread_mutex_unlock(&arena->mutex);
-    
+
     if (total_entries <= 0 || total_verts <= 0) {
       return;
     }
 
-    auto float_opts = torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32);
-    auto int_opts = torch::TensorOptions().device(torch::kCUDA).dtype(torch::kInt16);
+    c10::InferenceMode guard;
+    model.eval();
 
-    // zero-copy views on mapped host memory (as device pointers)
+    auto float_opts = torch::TensorOptions().device(kInferDevice).dtype(torch::kFloat32);
+    auto int_opts = torch::TensorOptions().device(kInferDevice).dtype(torch::kInt16);
 
     auto counts_gpu_view =  torch::from_blob(d_crossing_counts, {total_entries}, int_opts);
 
-    auto graph_gpu_view = torch::from_blob(d_graph, {total_verts, GRAPH_DEGREE}, int_opts);
-
+    auto graph_gpu_view =  torch::from_blob(d_graph, {total_verts, GRAPH_DEGREE}, int_opts);
     auto other_features_gpu_view = torch::from_blob(d_other_features, {total_verts, N_OTHER_FEATURES}, int_opts);
-
     auto facial_lengths_gpu_view = torch::from_blob(d_facial_lengths, {total_verts, N_FACES}, int_opts);
 
     auto output_tuple = model.forward({facial_lengths_gpu_view, other_features_gpu_view, graph_gpu_view, counts_gpu_view})  .toTuple();
@@ -109,7 +126,9 @@ public:
     auto value_arena_view = torch::from_blob(d_value_outputs, {total_entries}, float_opts);
     value_arena_view.copy_(values);
 
+    #ifdef USE_CUDA
     cudaDeviceSynchronize();
+    #endif
 
     pthread_mutex_lock(&arena->mutex);
     arena->entries_left = total_entries; // NOT blindly BATCH_SIZE
@@ -118,7 +137,7 @@ public:
   }
 };
 
-double Node::expand(InferenceServer &inference_server) {
+double Node::expand(SharedArena &arena) {
   if (is_expanded) {
     std::cerr << "Node already expanded" << std::endl;
     return 0.0;
@@ -126,11 +145,11 @@ double Node::expand(InferenceServer &inference_server) {
 
   is_expanded = true;
 
-  const auto [entry, first_vertex] = inference_server.arena.load(knot);
+  const auto [entry, first_vertex] = arena.load(knot);
 
   for (auto m : knot.moves()) {
     children.emplace_back(Child(this, m, 0.0));
   }
 
-  return inference_server.arena.unload(*this, entry, first_vertex);
+  return arena.unload(*this, entry, first_vertex);
 }
